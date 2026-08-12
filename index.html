@@ -192,12 +192,34 @@ function applyPreset(name){
  }
  P.erosion=name!=='jardin';const t=document.getElementById('tEro');if(t)t.checked=P.erosion;
  if(typeof simStep==='function'){const wu=name==='jardin'?340:170;for(let q=0;q<wu;q++)simStep()}
+ autoFlora(name);
  if(typeof onWorldRebuilt==='function')onWorldRebuilt();
+}
+function autoFlora(name){
+ const put=(type,n,h0,h1,slMax,s0,s1)=>{
+  for(let t=0,c=0;t<n*14&&c<n;t++){
+   const i=4+((Math.random()*(N-8))|0),j=4+((Math.random()*(N-8))|0),k=idx(i,j);
+   const h=terrain[k];
+   if(h<h0||h>h1)continue;
+   const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
+   if(sl>slMax)continue;
+   if(water[k]>0.015||wet[k]>0.5)continue;
+   objects.push({type:type,x:(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,z:(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,s:s0+Math.random()*(s1-s0),ry:Math.random()*6.28});
+   c++;
+  }
+ };
+ if(name==='montana'){put('pino',150,3,26,.75,.8,1.5);put('roca',180,1,42,2,.28,.62);put('arbusto',70,2,20,.7,.6,1.1)}
+ else if(name==='valle'){put('pino',170,3,32,.75,.8,1.5);put('roca',150,1,45,2,.28,.62);put('arbusto',80,2,24,.7,.6,1.1)}
+ else{put('roca',60,.5,9,1.2,.22,.45);put('arbusto',30,1,8,.7,.5,.9)}
 }
 /* ================= ESCENA 3D ================= */
 let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bottomMesh;
 let inst={},walls=[];
-let tPos,tNor,tCol,wPos,wNor,wCol,wAlp,wSpd,wDir,fPos,fAlp,fSize;
+let tPos,tNor,tCol,wPos,wNor,wDep,wSpd,wDir,fPos,fAlp,fSize;
+const GLSLN='float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
+'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
+' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
+'float fbm2(vec2 p){return .5*vn2(p)+.25*vn2(p*2.13)+.125*vn2(p*4.31);}\n';
 const SUNDIR=new THREE.Vector3(.55,.75,.35).normalize();
 const MAXFOAM=2000;let foam=[];
 function setupScene(){
@@ -226,48 +248,71 @@ function setupScene(){
  tPos=tg.attributes.position.array;tNor=tg.attributes.normal;
  for(let k=0;k<NN;k++){const i=k%N,j=(k/N)|0;tPos[k*3]=(i/(N-1)-.5)*WORLD;tPos[k*3+1]=0;tPos[k*3+2]=(j/(N-1)-.5)*WORLD}
  tCol=new Float32Array(NN*3);tg.setAttribute('color',new THREE.BufferAttribute(tCol,3));
- terrainMesh=new THREE.Mesh(tg,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.97,metalness:0}));
+ const tMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.97,metalness:0});
+ tMat.onBeforeCompile=sh=>{
+  sh.vertexShader=sh.vertexShader
+   .replace('#include <common>','#include <common>\nvarying vec3 vWP;')
+   .replace('#include <begin_vertex>','#include <begin_vertex>\nvWP=(modelMatrix*vec4(position,1.)).xyz;');
+  sh.fragmentShader=sh.fragmentShader
+   .replace('#include <common>','#include <common>\nvarying vec3 vWP;\n'+GLSLN)
+   .replace('#include <color_fragment>','#include <color_fragment>\n{float g1=fbm2(vWP.xz*1.9);float g2=vn2(vWP.xz*8.3);float g3=vn2(vWP.xz*27.1);diffuseColor.rgb*=.78+.30*g1+.12*g2+.07*g3;}');
+ };
+ terrainMesh=new THREE.Mesh(tg,tMat);
  terrainMesh.receiveShadow=true;terrainMesh.castShadow=true;
  scene.add(terrainMesh);
  /* agua */
  const wg=new THREE.PlaneGeometry(WORLD,WORLD,N-1,N-1);
  wPos=wg.attributes.position.array;wNor=wg.attributes.normal;
  for(let k=0;k<NN;k++){const i=k%N,j=(k/N)|0;wPos[k*3]=(i/(N-1)-.5)*WORLD;wPos[k*3+1]=-1;wPos[k*3+2]=(j/(N-1)-.5)*WORLD}
- wCol=new Float32Array(NN*3);wAlp=new Float32Array(NN);wSpd=new Float32Array(NN);wDir=new Float32Array(NN*2);
- wg.setAttribute('aCol',new THREE.BufferAttribute(wCol,3));
- wg.setAttribute('aAlpha',new THREE.BufferAttribute(wAlp,1));
+ wDep=new Float32Array(NN);wSpd=new Float32Array(NN);wDir=new Float32Array(NN*2);
+ wg.setAttribute('aDepth',new THREE.BufferAttribute(wDep,1));
  wg.setAttribute('aSpd',new THREE.BufferAttribute(wSpd,1));
  wg.setAttribute('aDir',new THREE.BufferAttribute(wDir,2));
  waterMesh=new THREE.Mesh(wg,new THREE.ShaderMaterial({transparent:true,
   uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009}},
-  vertexShader:'attribute vec3 aCol;attribute float aAlpha;attribute float aSpd;attribute vec2 aDir;\n'+
-   'varying vec3 vN;varying vec3 vW;varying vec3 vC;varying float vA;varying float vS;varying vec2 vD;\n'+
-   'void main(){vN=normal;vC=aCol;vA=aAlpha;vS=aSpd;vD=aDir;vec4 wp=modelMatrix*vec4(position,1.);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}',
+  vertexShader:'attribute float aDepth;attribute float aSpd;attribute vec2 aDir;\n'+
+   'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
+   'void main(){vN=normal;vDep=aDepth;vS=aSpd;vD=aDir;vec4 wp=modelMatrix*vec4(position,1.);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}',
   fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;\n'+
-   'varying vec3 vN;varying vec3 vW;varying vec3 vC;varying float vA;varying float vS;varying vec2 vD;\n'+
-   'void main(){vec3 n=normalize(vN);\n'+
-   'float sf=clamp(vS/4.,0.,1.);\n'+
-   'float amp=mix(0.007,0.10,sf);\n'+
-   'n.xz+=amp*vec2(sin(vW.x*2.3+uT*(1.2+vS*1.4))+sin(vW.z*3.6-uT*(1.6+vS)),cos(vW.z*2.0+uT*(1.1+vS))+sin(vW.x*3.2+uT*1.8));\n'+
-   'n=normalize(n);\n'+
+   'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
+   'float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
+   'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
+   ' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
+   'float fbm2(vec2 p){return .5*vn2(p)+.25*vn2(p*2.13)+.125*vn2(p*4.31);}\n'+
+   'void main(){\n'+
+   'vec2 dir=length(vD)>.05?normalize(vD):vec2(0.,1.);\n'+
+   'float spN=clamp(vS/4.,0.,1.);\n'+
+   'float T=uT*(.3+vS*.45);\n'+
+   'vec2 uv=vW.xz*.5;\n'+
+   'float ph1=fract(T);float ph2=fract(T+.5);\n'+
+   'float blend=abs(ph1*2.-1.);\n'+
+   'vec2 uv1=uv-dir*ph1*2.4;\n'+
+   'vec2 uv2=uv*1.06-dir*ph2*2.4+vec2(17.3,9.1);\n'+
+   'float na=mix(fbm2(uv1*1.7),fbm2(uv2*1.7),blend);\n'+
+   'float nb=mix(fbm2(uv1*1.7+31.7),fbm2(uv2*1.7+31.7),blend);\n'+
+   'float e=.07+.20*spN;\n'+
+   'vec3 n=normalize(vec3(vN.x+e*(na-.5)*2.,max(vN.y,.35),vN.z+e*(nb-.5)*2.));\n'+
    'vec3 V=normalize(cameraPosition-vW);\n'+
-   'float dif=0.5+0.5*max(dot(n,sunDir),0.);\n'+
-   'vec3 col=vC*dif;\n'+
-   'float fr=pow(1.-max(dot(n,V),0.),2.5);\n'+
-   'col=mix(col,vec3(.62,.78,.92),fr*mix(.72,.42,sf));\n'+
-   'float spq=pow(max(dot(reflect(-sunDir,n),V),0.),mix(180.,50.,sf));\n'+
-   'col+=vec3(spq*mix(1.1,.7,sf));\n'+
-   'vec2 dir=length(vD)>0.03?normalize(vD):vec2(1.,0.);\n'+
-   'vec2 perp=vec2(-dir.y,dir.x);\n'+
-   'float phase=dot(vW.xz,dir)*1.35-uT*(.8+vS*2.6);\n'+
-   'float lanes=sin(dot(vW.xz,perp)*2.4+sin(phase*.6)*1.4);\n'+
-   'float streak=smoothstep(.35,1.,lanes*sin(phase))*clamp((vS-.55)/2.6,0.,1.)*.34;\n'+
-   'col+=vec3(streak);\n'+
+   'float dep=max(vDep,0.);\n'+
+   'vec3 col=mix(vec3(.33,.60,.58),vec3(.02,.14,.30),1.-exp(-dep*.85));\n'+
+   'col=mix(col,vec3(.42,.72,.78),spN*.35);\n'+
+   'float dif=.45+.55*max(dot(n,sunDir),0.);\n'+
+   'col*=dif;\n'+
+   'float fr=pow(1.-max(dot(n,V),0.),3.);\n'+
+   'col=mix(col,vec3(.58,.74,.90),fr*.65);\n'+
+   'float spq=pow(max(dot(reflect(-sunDir,n),V),0.),mix(240.,48.,spN));\n'+
+   'col+=vec3(1.,.98,.9)*spq*.9;\n'+
+   'float foamN=mix(fbm2(uv1*3.3+7.7),fbm2(uv2*3.3+7.7),blend);\n'+
+   'float foamA=smoothstep(.58,.82,foamN)*clamp((vS-1.1)/2.4,0.,1.);\n'+
+   'foamA+=smoothstep(.02,.09,dep)*(1.-smoothstep(.09,.28,dep))*.5*clamp(vS*.8,0.,1.);\n'+
+   'foamA=clamp(foamA,0.,1.);\n'+
+   'col=mix(col,vec3(.96,.98,1.),foamA*.85);\n'+
    'float d=length(cameraPosition-vW);\n'+
    'float fg=1.-exp(-fogD*fogD*d*d);\n'+
    'col=mix(col,fogC,fg);\n'+
-   'float gate=smoothstep(.02,.25,vA);\n'+
-   'float a=clamp(vA*(.6+.4*fr)+(spq*.4+streak*.5)*gate,0.,.96);\n'+
+   'float a=smoothstep(.015,.35,dep)*(.58+.30*fr);\n'+
+   'a=max(a,foamA*.75);\n'+
+   'a=clamp(a,0.,.96);\n'+
    'gl_FragColor=vec4(col,a);}'}));
  waterMesh.renderOrder=2;scene.add(waterMesh);
  /* diorama: paredes y fondo */
@@ -375,22 +420,14 @@ function updateWaterMesh(){
   d=wVis[k];
   const sl2=i>0?spd[k-1]:0,sr2=i<N-1?spd[k+1]:0,st2=j>0?spd[k-N]:0,sb2=j<N-1?spd[k+N]:0;
   const s=(spd[k]*2+sl2+sr2+st2+sb2)/6;
-  const vis=d>0.015;
-  wPos[k*3+1]=vis?terrain[k]+d+0.07:terrain[k]-0.35;
-  const aD=clamp((d-0.015)/0.10,0,1);
-  wAlp[k]=vis?Math.pow(aD,0.6)*0.95:0;
+  const vis=d>0.012;
+  wPos[k*3+1]=vis?terrain[k]+d+0.04:terrain[k]-0.35;
+  wDep[k]=vis?d:0;
   wSpd[k]=s;
   wDir[k*2]=vX[k];wDir[k*2+1]=vY[k];
-  const dp=clamp(d/5,0,1),sf=clamp(s/4,0,1);
-  let r=.15-.13*dp,g=.55-.40*dp,b=.62-.22*dp;
-  r+=(.45-r)*sf*.5;g+=(.72-g)*sf*.5;b+=(.80-b)*sf*.5;
-  let fo=d>0.03?clamp((s-2.4)/2.8,0,1):0;
-  if(d>0.03&&d<0.5&&s>1.4)fo=Math.max(fo,clamp((s-1.4)/2,0,1)*((0.5-d)/0.5)*.8);
-  fo*=.65;r+=(1-r)*fo;g+=(1-g)*fo;b+=(1-b)*fo;
-  wCol[k*3]=r;wCol[k*3+1]=g;wCol[k*3+2]=b;
  }
  const ga=waterMesh.geometry.attributes;
- ga.position.needsUpdate=true;ga.aCol.needsUpdate=true;ga.aAlpha.needsUpdate=true;ga.aSpd.needsUpdate=true;ga.aDir.needsUpdate=true;
+ ga.position.needsUpdate=true;ga.aDepth.needsUpdate=true;ga.aSpd.needsUpdate=true;ga.aDir.needsUpdate=true;
  fastNormals(wPos,wNor);
 }
 /* ================= OBJETOS ================= */
@@ -418,7 +455,8 @@ function mergeGeo(parts){
  return g;
 }
 function TM(x,y,z,s,sy){return new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion(),new THREE.Vector3(s,sy||s,s))}
-let objMat=null;
+function TR(x,y,z,rx,rz,s){return new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,0,rz)),new THREE.Vector3(s,s,s))}
+let objMat=null,grassMesh=null,grassPts=[];
 function buildInstances(){
  objMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9});
  const defs={};
@@ -451,12 +489,51 @@ function buildInstances(){
   {g:new THREE.IcosahedronGeometry(.85,1),m:TM(.9,.7,.3,1,.7),c:[.26,.5,.2]},
   {g:new THREE.IcosahedronGeometry(.7,1),m:TM(-.7,.65,-.3,1,.7),c:[.2,.42,.16]}]);
  inst={};
+ const caps={pino:2600,roca:2600,cerezo:800,farol:800,bambu:800,arbusto:800};
  for(const t in defs){
-  const im=new THREE.InstancedMesh(defs[t],objMat,800);
+  const im=new THREE.InstancedMesh(defs[t],objMat,caps[t]||800);
   im.count=0;im.castShadow=true;im.receiveShadow=true;
   im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   inst[t]=im;scene.add(im);
  }
+ const grassGeo=mergeGeo([
+  {g:new THREE.ConeGeometry(.06,.95,4,1,true),m:TR(0,.45,0,.18,.10,1),c:[.28,.55,.20]},
+  {g:new THREE.ConeGeometry(.05,.80,4,1,true),m:TR(.14,.38,.06,-.14,-.22,1),c:[.34,.62,.24]},
+  {g:new THREE.ConeGeometry(.05,.70,4,1,true),m:TR(-.12,.33,-.08,.10,.26,1),c:[.23,.47,.16]},
+  {g:new THREE.ConeGeometry(.045,.60,4,1,true),m:TR(.02,.28,-.13,-.24,.05,1),c:[.38,.66,.28]}]);
+ grassMesh=new THREE.InstancedMesh(grassGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}),5200);
+ grassMesh.count=0;grassMesh.receiveShadow=true;
+ grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ scene.add(grassMesh);
+}
+function scatterGrass(){
+ grassPts=[];
+ const dense=currentPreset==='jardin'?1.25:1;
+ for(let t=0;t<15000&&grassPts.length<5100;t++){
+  const i=3+((Math.random()*(N-6))|0),j=3+((Math.random()*(N-6))|0),k=idx(i,j);
+  const h=terrain[k];
+  if(h<1.2||h>44)continue;
+  const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
+  if(sl>0.85)continue;
+  if(water[k]>0.02||wet[k]>0.45)continue;
+  if(Math.random()>dense)continue;
+  grassPts.push({x:(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL*1.6,z:(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL*1.6,s:.75+Math.random()*.85,ry:Math.random()*6.28});
+ }
+ syncGrass();
+}
+function syncGrass(){
+ if(!grassMesh)return;
+ let n=0;
+ for(const g of grassPts){
+  if(n>=5200)break;
+  _e.set(0,g.ry,0);_q.setFromEuler(_e);
+  _v3.set(g.x,terrainHeightAt(g.x,g.z)-.05,g.z);
+  _s3.set(g.s,g.s,g.s);
+  _m4.compose(_v3,_q,_s3);
+  grassMesh.setMatrixAt(n++,_m4);
+ }
+ grassMesh.count=n;
+ grassMesh.instanceMatrix.needsUpdate=true;
 }
 function terrainHeightAt(x,z){
  const fi=clamp((x/WORLD+.5)*(N-1),0,N-1.001),fj=clamp((z/WORLD+.5)*(N-1),0,N-1.001);
@@ -480,10 +557,8 @@ function rebuildMarkers(){
  while(markerGroup.children.length)markerGroup.remove(markerGroup.children[0]);
  for(const s of sources){
   const x=(s.i/(N-1)-.5)*WORLD,z=(s.j/(N-1)-.5)*WORLD,y=terrain[idx(s.i,s.j)];
-  const m=new THREE.Mesh(new THREE.SphereGeometry(1.1,10,8),new THREE.MeshStandardMaterial({color:0x59e0ff,emissive:0x2fa8d8,emissiveIntensity:.8,roughness:.3}));
-  m.position.set(x,y+.6,z);markerGroup.add(m);
-  const r=new THREE.Mesh(new THREE.TorusGeometry(1.8,.16,8,20),new THREE.MeshStandardMaterial({color:0xbfefff,emissive:0x59e0ff,emissiveIntensity:.5}));
-  r.rotation.x=Math.PI/2;r.position.set(x,y+.35,z);markerGroup.add(r);
+  const m=new THREE.Mesh(new THREE.SphereGeometry(.62,10,8),new THREE.MeshStandardMaterial({color:0x8fe8ff,emissive:0x2fa8d8,emissiveIntensity:.55,roughness:.25,transparent:true,opacity:.85}));
+  m.position.set(x,y+.28,z);markerGroup.add(m);
  }
 }
 /* ================= ESTRUCTURAS: puentes y compuertas ================= */
@@ -570,7 +645,7 @@ function onWorldRebuilt(){
  clearStructures();
  for(const p of structuresPending)addStructure(p.kind,p.x,p.z,p.ry,p.open);
  structuresPending=[];
- updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();foam.length=0;
+ updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();scatterGrass();foam.length=0;
 }
 /* ================= SIMULACIÓN ================= */
 const DT=0.14,DAMP=0.985,GK=9.81*0.55;
@@ -788,7 +863,7 @@ function onMove(ev){
 function onUp(ev){
  ptrs.delete(ev.pointerId);
  if(mode==='pinch'&&ptrs.size<2)mode=null;
- if(mode==='paint'){painting=false;mode=null}
+ if(mode==='paint'){painting=false;mode=null;syncGrass()}
  else if(mode==='rot'||mode==='pan')mode=null;
 }
 /* ================= HERRAMIENTAS ================= */
