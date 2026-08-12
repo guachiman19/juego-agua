@@ -234,7 +234,9 @@ function autoFlora(name){
 let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bottomMesh;
 let cubeRT=null,cubeCam=null,sun=null,hemi=null,moon=null;
 let inst={},walls=[];
-let tPos,tNor,tCol,wPos,wNor,wDep,wSpd,wDir,fPos,fAlp,fSize;
+let tPos,tNor,tCol,fPos,fAlp,fSize;
+let wDatS,wDatF,texSurf,texFlow;
+const RW=512;
 const GLSLN='float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
 'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
 ' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
@@ -299,30 +301,75 @@ function setupScene(){
  terrainMesh=new THREE.Mesh(tg,tMat);
  terrainMesh.receiveShadow=true;terrainMesh.castShadow=true;
  scene.add(terrainMesh);
- /* agua */
- const wg=new THREE.PlaneGeometry(WORLD,WORLD,N-1,N-1);
- wPos=wg.attributes.position.array;wNor=wg.attributes.normal;
- for(let k=0;k<NN;k++){const i=k%N,j=(k/N)|0;wPos[k*3]=(i/(N-1)-.5)*WORLD;wPos[k*3+1]=-1;wPos[k*3+2]=(j/(N-1)-.5)*WORLD}
- wDep=new Float32Array(NN);wSpd=new Float32Array(NN);wDir=new Float32Array(NN*2);
- wg.setAttribute('aDepth',new THREE.BufferAttribute(wDep,1));
- wg.setAttribute('aSpd',new THREE.BufferAttribute(wSpd,1));
- wg.setAttribute('aDir',new THREE.BufferAttribute(wDir,2));
+ /* agua: malla densa de render desplazada en GPU */
+ wDatS=new Uint8Array(NN*4);wDatF=new Uint8Array(NN*4);
+ texSurf=new THREE.DataTexture(wDatS,N,N,THREE.RGBAFormat);
+ texSurf.magFilter=THREE.NearestFilter;texSurf.minFilter=THREE.NearestFilter;
+ texFlow=new THREE.DataTexture(wDatF,N,N,THREE.RGBAFormat);
+ texFlow.magFilter=THREE.LinearFilter;texFlow.minFilter=THREE.LinearFilter;
+ const wg=new THREE.BufferGeometry();
+ {
+  const wp2=new Float32Array(RW*RW*3),wu2=new Float32Array(RW*RW*2);
+  for(let jj=0;jj<RW;jj++)for(let ii=0;ii<RW;ii++){
+   const q=jj*RW+ii;
+   wp2[q*3]=(ii/(RW-1)-.5)*WORLD;wp2[q*3+1]=0;wp2[q*3+2]=(jj/(RW-1)-.5)*WORLD;
+   wu2[q*2]=ii/(RW-1);wu2[q*2+1]=jj/(RW-1);
+  }
+  const idxA=new Uint32Array((RW-1)*(RW-1)*6);
+  let o2=0;
+  for(let jj=0;jj<RW-1;jj++)for(let ii=0;ii<RW-1;ii++){
+   const a=jj*RW+ii,b=a+1,c=a+RW,d2=c+1;
+   idxA[o2++]=a;idxA[o2++]=c;idxA[o2++]=b;
+   idxA[o2++]=b;idxA[o2++]=c;idxA[o2++]=d2;
+  }
+  wg.setAttribute('position',new THREE.BufferAttribute(wp2,3));
+  wg.setAttribute('uv',new THREE.BufferAttribute(wu2,2));
+  wg.setIndex(new THREE.BufferAttribute(idxA,1));
+ }
  cubeRT=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
  cubeCam=new THREE.CubeCamera(1,1500,cubeRT);
  scene.add(cubeCam);
  waterMesh=new THREE.Mesh(wg,new THREE.ShaderMaterial({transparent:true,
-  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uEnv:{value:cubeRT.texture}},
-  vertexShader:'attribute float aDepth;attribute float aSpd;attribute vec2 aDir;\n'+
-   'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
-   'void main(){vN=normal;vDep=aDepth;vS=aSpd;vD=aDir;vec4 wp=modelMatrix*vec4(position,1.);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}',
-  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform samplerCube uEnv;\n'+
-   'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
+  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uEnv:{value:cubeRT.texture},tSurf:{value:texSurf},tFlow:{value:texFlow}},
+  vertexShader:'uniform sampler2D tSurf;uniform sampler2D tFlow;\n'+
+   'varying vec3 vN;varying vec3 vW;varying vec2 vUv;\n'+
+   'float dec(vec4 c){return (c.r*65280.+c.g*255.)/65535.*102.-6.;}\n'+
+   'float surfAt(vec2 u){\n'+
+   ' vec2 p=u*256.-.5;\n'+
+   ' vec2 f=fract(p);\n'+
+   ' vec2 c0=(floor(p)+.5)/256.;\n'+
+   ' float s00=dec(texture2D(tSurf,c0));\n'+
+   ' float s10=dec(texture2D(tSurf,c0+vec2(1./256.,0.)));\n'+
+   ' float s01=dec(texture2D(tSurf,c0+vec2(0.,1./256.)));\n'+
+   ' float s11=dec(texture2D(tSurf,c0+vec2(1./256.,1./256.)));\n'+
+   ' return mix(mix(s00,s10,f.x),mix(s01,s11,f.x),f.y);\n'+
+   '}\n'+
+   'void main(){\n'+
+   ' vec2 u=uv;\n'+
+   ' float s=surfAt(u);\n'+
+   ' float e=1.2/256.;\n'+
+   ' float sx=surfAt(u+vec2(e,0.));\n'+
+   ' float sz=surfAt(u+vec2(0.,e));\n'+
+   ' float dep=texture2D(tFlow,u).r*8.;\n'+
+   ' float yy=s+(dep>0.006?0.04:-0.06);\n'+
+   ' vN=normalize(vec3(s-sx,e*220.,s-sz));\n'+
+   ' vUv=u;\n'+
+   ' vec4 wp=modelMatrix*vec4(position.x,yy,position.z,1.);\n'+
+   ' vW=wp.xyz;\n'+
+   ' gl_Position=projectionMatrix*viewMatrix*wp;\n'+
+   '}',
+  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform samplerCube uEnv;uniform sampler2D tFlow;\n'+
+   'varying vec3 vN;varying vec3 vW;varying vec2 vUv;\n'+
    'float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
    'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
    ' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
    'float fbm2(vec2 p){mat2 R=mat2(.8,-.6,.6,.8);float s=.5*vn2(p);p=R*p*2.13;s+=.25*vn2(p);p=R*p*2.07;s+=.125*vn2(p);p=R*p*1.93;s+=.0625*vn2(p);return s*1.07;}\n'+
    'void main(){\n'+
-   'vec2 dir=length(vD)>.05?normalize(vD):vec2(0.,1.);\n'+
+   'vec4 fl=texture2D(tFlow,vUv);\n'+
+   'float dep=fl.r*8.;\n'+
+   'float vS=fl.g*10.;\n'+
+   'vec2 dirRaw=(fl.ba-.5)*2.;\n'+
+   'vec2 dir=length(dirRaw)>.06?normalize(dirRaw):vec2(0.,1.);\n'+
    'float spN=clamp(vS/4.,0.,1.);\n'+
    'float T=uT*(.3+vS*.45);\n'+
    'vec2 uv=vW.xz*.5;\n'+
@@ -335,7 +382,7 @@ function setupScene(){
    'float e=.07+.20*spN;\n'+
    'vec3 n=normalize(vec3(vN.x+e*(na-.5)*2.,max(vN.y,.35),vN.z+e*(nb-.5)*2.));\n'+
    'vec3 V=normalize(cameraPosition-vW);\n'+
-   'float dep=max(vDep,0.);\n'+
+   'dep=max(dep+(h21(vW.xz*13.7)-.5)*.05,0.);\n'+
    'vec3 col=mix(vec3(.33,.60,.58),vec3(.02,.14,.30),1.-exp(-dep*.85));\n'+
    'col=mix(col,vec3(.42,.72,.78),spN*.35);\n'+
    'float dif=.45+.55*max(dot(n,sunDir),0.);\n'+
@@ -349,13 +396,13 @@ function setupScene(){
    'col+=vec3(1.,.98,.9)*spq*.9;\n'+
    'float foamN=mix(fbm2(uv1*3.3+7.7),fbm2(uv2*3.3+7.7),blend);\n'+
    'float foamA=smoothstep(.58,.82,foamN)*clamp((vS-1.1)/2.4,0.,1.);\n'+
-   'foamA+=smoothstep(.02,.09,dep)*(1.-smoothstep(.09,.28,dep))*.5*clamp(vS*.8,0.,1.);\n'+
+   'foamA+=smoothstep(.015,.07,dep)*(1.-smoothstep(.07,.25,dep))*.5*clamp(vS*.8,0.,1.);\n'+
    'foamA=clamp(foamA,0.,1.);\n'+
    'col=mix(col,vec3(.96,.98,1.),foamA*.85);\n'+
    'float d=length(cameraPosition-vW);\n'+
    'float fg=1.-exp(-fogD*fogD*d*d);\n'+
    'col=mix(col,fogC,fg);\n'+
-   'float a=smoothstep(.015,.35,dep)*(.58+.30*fr);\n'+
+   'float a=smoothstep(.010,.30,dep)*(.58+.30*fr);\n'+
    'a=max(a,foamA*.75);\n'+
    'a=clamp(a,0.,.96);\n'+
    'gl_FragColor=vec4(col,a);}'}));
@@ -469,7 +516,7 @@ function updateEnvMap(){
  cubeCam.update(renderer,scene);
  waterMesh.visible=true;foamPts.visible=true;markerGroup.visible=true;
 }
-/* ---- malla de agua: profundidad, velocidad y direccion al shader ---- */
+/* ---- agua: empaquetar sim en texturas para el desplazamiento GPU ---- */
 function updateWaterMesh(){
  for(let k=0;k<NN;k++){
   const i=k%N,j=(k/N)|0;
@@ -480,23 +527,19 @@ function updateWaterMesh(){
   d=wVis[k];
   const sl2=i>0?spd[k-1]:0,sr2=i<N-1?spd[k+1]:0,st2=j>0?spd[k-N]:0,sb2=j<N-1?spd[k+N]:0;
   const s=(spd[k]*2+sl2+sr2+st2+sb2)/6;
-  const vis=d>0.012;
-  if(vis){wPos[k*3+1]=terrain[k]+d+0.04;wDep[k]=d}
-  else{
-   let ms=1e9;
-   if(i>0&&wVis[k-1]>0.012){const s2=terrain[k-1]+wVis[k-1];if(s2<ms)ms=s2}
-   if(i<N-1&&wVis[k+1]>0.012){const s2=terrain[k+1]+wVis[k+1];if(s2<ms)ms=s2}
-   if(j>0&&wVis[k-N]>0.012){const s2=terrain[k-N]+wVis[k-N];if(s2<ms)ms=s2}
-   if(j<N-1&&wVis[k+N]>0.012){const s2=terrain[k+N]+wVis[k+N];if(s2<ms)ms=s2}
-   wPos[k*3+1]=ms<1e8?ms-0.02:terrain[k]-0.35;
-   wDep[k]=0;
-  }
-  wSpd[k]=s;
-  wDir[k*2]=vX[k];wDir[k*2+1]=vY[k];
+  const dv=d>0.012?d:0;
+  const surf=clamp((terrain[k]+dv+6)/102,0,1)*65535;
+  const hi=(surf/256)|0;
+  const k4=k*4;
+  wDatS[k4]=hi;
+  wDatS[k4+1]=(surf-hi*256)|0;
+  wDatF[k4]=dv>=8?255:(dv*31.875)|0;
+  wDatF[k4+1]=s>=10?255:(s*25.5)|0;
+  wDatF[k4+2]=(clamp(vX[k]/14,-1,1)*127+128)|0;
+  wDatF[k4+3]=(clamp(vY[k]/14,-1,1)*127+128)|0;
  }
- const ga=waterMesh.geometry.attributes;
- ga.position.needsUpdate=true;ga.aDepth.needsUpdate=true;ga.aSpd.needsUpdate=true;ga.aDir.needsUpdate=true;
- fastNormals(wPos,wNor);
+ texSurf.needsUpdate=true;
+ texFlow.needsUpdate=true;
 }
 /* ================= OBJETOS ================= */
 function mergeGeo(parts){
@@ -529,33 +572,33 @@ function buildInstances(){
  objMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9});
  const defs={};
  defs.pino=mergeGeo([
-  {g:new THREE.CylinderGeometry(.22,.3,1.6,6),m:TM(0,.8,0,1),c:[.36,.24,.14]},
-  {g:new THREE.ConeGeometry(1.5,2.4,8),m:TM(0,2.5,0,1),c:[.13,.38,.18]},
-  {g:new THREE.ConeGeometry(1.15,2.0,8),m:TM(0,4.0,0,1),c:[.16,.44,.2]},
-  {g:new THREE.ConeGeometry(.8,1.6,8),m:TM(0,5.3,0,1),c:[.2,.5,.24]}]);
+  {g:new THREE.CylinderGeometry(.22,.3,1.6,10),m:TM(0,.8,0,1),c:[.36,.24,.14]},
+  {g:new THREE.ConeGeometry(1.5,2.4,12),m:TM(0,2.5,0,1),c:[.13,.38,.18]},
+  {g:new THREE.ConeGeometry(1.15,2.0,12),m:TM(0,4.0,0,1),c:[.16,.44,.2]},
+  {g:new THREE.ConeGeometry(.8,1.6,12),m:TM(0,5.3,0,1),c:[.2,.5,.24]}]);
  defs.cerezo=mergeGeo([
-  {g:new THREE.CylinderGeometry(.2,.34,2.2,6),m:TM(0,1.1,0,1),c:[.32,.2,.13]},
-  {g:new THREE.IcosahedronGeometry(1.7,1),m:TM(0,3.1,0,1,.8),c:[.95,.65,.75]},
-  {g:new THREE.IcosahedronGeometry(1.1,1),m:TM(1.0,2.6,.4,1),c:[.97,.72,.8]},
-  {g:new THREE.IcosahedronGeometry(.9,1),m:TM(-.9,2.8,-.3,1),c:[.93,.6,.72]}]);
+  {g:new THREE.CylinderGeometry(.2,.34,2.2,10),m:TM(0,1.1,0,1),c:[.32,.2,.13]},
+  {g:new THREE.IcosahedronGeometry(1.7,2),m:TM(0,3.1,0,1,.8),c:[.95,.65,.75]},
+  {g:new THREE.IcosahedronGeometry(1.1,2),m:TM(1.0,2.6,.4,1),c:[.97,.72,.8]},
+  {g:new THREE.IcosahedronGeometry(.9,2),m:TM(-.9,2.8,-.3,1),c:[.93,.6,.72]}]);
  defs.roca=mergeGeo([
-  {g:new THREE.IcosahedronGeometry(1.3,1),m:TM(0,.55,0,1,.72),c:[.52,.5,.48]},
-  {g:new THREE.IcosahedronGeometry(.8,1),m:TM(.9,.35,.4,1,.6),c:[.46,.45,.44]}]);
+  {g:new THREE.IcosahedronGeometry(1.3,2),m:TM(0,.55,0,1,.72),c:[.52,.5,.48]},
+  {g:new THREE.IcosahedronGeometry(.8,2),m:TM(.9,.35,.4,1,.6),c:[.46,.45,.44]}]);
  defs.farol=mergeGeo([
-  {g:new THREE.CylinderGeometry(.5,.62,.3,8),m:TM(0,.15,0,1),c:[.62,.6,.57]},
-  {g:new THREE.CylinderGeometry(.16,.2,1.1,6),m:TM(0,.85,0,1),c:[.58,.56,.54]},
+  {g:new THREE.CylinderGeometry(.5,.62,.3,12),m:TM(0,.15,0,1),c:[.62,.6,.57]},
+  {g:new THREE.CylinderGeometry(.16,.2,1.1,10),m:TM(0,.85,0,1),c:[.58,.56,.54]},
   {g:new THREE.BoxGeometry(.85,.55,.85),m:TM(0,1.65,0,1),c:[.95,.86,.6]},
   {g:new THREE.ConeGeometry(.85,.5,4),m:TM(0,2.1,0,1),c:[.5,.48,.46]}]);
  defs.bambu=mergeGeo([
-  {g:new THREE.CylinderGeometry(.12,.15,4.6,5),m:TM(0,2.3,0,1),c:[.55,.72,.35]},
-  {g:new THREE.CylinderGeometry(.10,.12,3.8,5),m:TM(.7,1.9,.3,1),c:[.50,.68,.32]},
-  {g:new THREE.CylinderGeometry(.09,.11,3.2,5),m:TM(-.55,1.6,-.25,1),c:[.58,.75,.38]},
-  {g:new THREE.ConeGeometry(.55,1.2,5),m:TM(0,4.9,0,1),c:[.45,.66,.3]},
-  {g:new THREE.ConeGeometry(.45,1.0,5),m:TM(.7,4.1,.3,1),c:[.42,.62,.28]}]);
+  {g:new THREE.CylinderGeometry(.12,.15,4.6,8),m:TM(0,2.3,0,1),c:[.55,.72,.35]},
+  {g:new THREE.CylinderGeometry(.10,.12,3.8,8),m:TM(.7,1.9,.3,1),c:[.50,.68,.32]},
+  {g:new THREE.CylinderGeometry(.09,.11,3.2,8),m:TM(-.55,1.6,-.25,1),c:[.58,.75,.38]},
+  {g:new THREE.ConeGeometry(.55,1.2,8),m:TM(0,4.9,0,1),c:[.45,.66,.3]},
+  {g:new THREE.ConeGeometry(.45,1.0,8),m:TM(.7,4.1,.3,1),c:[.42,.62,.28]}]);
  defs.arbusto=mergeGeo([
-  {g:new THREE.IcosahedronGeometry(1.2,1),m:TM(0,.9,0,1,.75),c:[.22,.45,.18]},
-  {g:new THREE.IcosahedronGeometry(.85,1),m:TM(.9,.7,.3,1,.7),c:[.26,.5,.2]},
-  {g:new THREE.IcosahedronGeometry(.7,1),m:TM(-.7,.65,-.3,1,.7),c:[.2,.42,.16]}]);
+  {g:new THREE.IcosahedronGeometry(1.2,2),m:TM(0,.9,0,1,.75),c:[.22,.45,.18]},
+  {g:new THREE.IcosahedronGeometry(.85,2),m:TM(.9,.7,.3,1,.7),c:[.26,.5,.2]},
+  {g:new THREE.IcosahedronGeometry(.7,2),m:TM(-.7,.65,-.3,1,.7),c:[.2,.42,.16]}]);
  inst={};
  const caps={pino:2600,roca:2600,cerezo:800,farol:800,bambu:800,arbusto:800};
  for(const t in defs){
@@ -578,9 +621,9 @@ function buildInstances(){
  lampMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
  scene.add(lampMesh);
  const fishGeo=mergeGeo([
-  {g:new THREE.ConeGeometry(.20,.72,6),m:TR(0,0,.06,Math.PI/2,0,1),c:[.93,.46,.16]},
-  {g:new THREE.SphereGeometry(.16,6,5),m:TM(0,0,.30,1,.8),c:[.97,.75,.45]},
-  {g:new THREE.ConeGeometry(.15,.34,4),m:TR(0,0,-.40,Math.PI/2,0,1),c:[.90,.38,.12]}]);
+  {g:new THREE.ConeGeometry(.20,.72,10),m:TR(0,0,.06,Math.PI/2,0,1),c:[.93,.46,.16]},
+  {g:new THREE.SphereGeometry(.16,10,8),m:TM(0,0,.30,1,.8),c:[.97,.75,.45]},
+  {g:new THREE.ConeGeometry(.15,.34,7),m:TR(0,0,-.40,Math.PI/2,0,1),c:[.90,.38,.12]}]);
  fishMesh=new THREE.InstancedMesh(fishGeo,objMat,100);
  fishMesh.count=0;
  fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -589,7 +632,7 @@ function buildInstances(){
 function spawnFish(){
  fish=[];
  const cand=[];
- for(let j=6;j<N-6;j+=2)for(let i=6;i<N-6;i+=2){const k=idx(i,j);if(water[k]>0.5)cand.push(k)}
+ for(let j=6;j<N-6;j+=2)for(let i=6;i<N-6;i+=2){const k=idx(i,j);if(water[k]>0.5&&spd[k]<1.2)cand.push(k)}
  for(let q=0;q<60&&cand.length;q++){
   const k=cand[(Math.random()*cand.length)|0];
   const i=k%N,j=(k/N)|0;
@@ -637,7 +680,7 @@ function updateFish(dt){
  if(fish.length<50&&(frame%120)===60){
   for(let t=0;t<40;t++){
    const i=6+((Math.random()*(N-12))|0),j=6+((Math.random()*(N-12))|0),k=idx(i,j);
-   if(water[k]>0.5){fish.push({x:(i/(N-1)-.5)*WORLD,z:(j/(N-1)-.5)*WORLD,dir:Math.random()*6.28,sp:.7+Math.random()*.9,ph:0,j:0});break}
+   if(water[k]>0.5&&spd[k]<1.2){fish.push({x:(i/(N-1)-.5)*WORLD,z:(j/(N-1)-.5)*WORLD,dir:Math.random()*6.28,sp:.7+Math.random()*.9,ph:0,j:0});break}
   }
  }
 }
