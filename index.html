@@ -27,6 +27,9 @@
  .sl input{flex:1;accent-color:var(--acc);height:14px}
  .sl b{width:26px;text-align:right;font-weight:500;font-size:10px;opacity:.7}
  .tg{display:flex;align-items:center;gap:7px;margin:6px 0;font-size:12px;cursor:pointer}
+ .bios{display:flex;gap:6px}
+ .bios .bio{flex:1;height:22px;border-radius:7px;border:2px solid transparent;padding:0}
+ .bios .bio.sel{border-color:var(--acc);box-shadow:0 0 8px rgba(77,216,255,.4)}
  .tg input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer}
  .btnrow{display:flex;gap:6px;margin-top:10px}
  .btnrow button{flex:1;padding:7px 2px;font-size:11px}
@@ -65,7 +68,15 @@
   <button data-t="farol">🏮<span>Farol</span></button>
   <button data-t="puente">🌉<span>Puente</span></button>
   <button data-t="compuerta">🚪<span>Compuerta</span></button>
+  <button data-t="bioma">🎨<span>Bioma</span></button>
   <button data-t="borrar">🧹<span>Borrar</span></button>
+ </div>
+ <div class="sec">Bioma para pintar</div>
+ <div class="bios">
+  <button class="bio sel" data-b="0" style="background:#4a7c33" title="Pradera"></button>
+  <button class="bio" data-b="1" style="background:#c9a86a" title="Arena"></button>
+  <button class="bio" data-b="2" style="background:#3f6b38" title="Musgo"></button>
+  <button class="bio" data-b="3" style="background:#dfe4ea" title="Nieve"></button>
  </div>
  <div class="sec">Ajustes</div>
  <div class="sl"><label>Pincel</label><input id="sBrush" type="range" min="4" max="34" step="1" value="14"/><b id="vBrush">14</b></div>
@@ -75,6 +86,9 @@
  <label class="tg"><input id="tEro" type="checkbox" checked/> Erosión del terreno</label>
  <label class="tg"><input id="tRain" type="checkbox"/> Lluvia</label>
  <label class="tg"><input id="tSnd" type="checkbox"/> Sonido de agua</label>
+ <div class="sec">Ambiente</div>
+ <div class="sl"><label>Hora</label><input id="sHour" type="range" min="0" max="239" step="1" value="100"/><b id="vHour">10h</b></div>
+ <label class="tg"><input id="tCycle" type="checkbox"/> Ciclo día y noche</label>
  <div class="btnrow">
   <button id="bSave">💾 Guardar</button>
   <button id="bLoad">📂 Cargar</button>
@@ -100,8 +114,9 @@ const N=256, WORLD=220, CELL=WORLD/(N-1), CA=CELL*CELL, NN=N*N;
 const terrain=new Float32Array(NN), water=new Float32Array(NN), sed=new Float32Array(NN), sedT=new Float32Array(NN);
 const fL=new Float32Array(NN), fR=new Float32Array(NN), fT=new Float32Array(NN), fB=new Float32Array(NN);
 const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN), spd=new Float32Array(NN), wTmp=new Float32Array(NN), wVis=new Float32Array(NN), gateH=new Float32Array(NN);
+const biome=new Uint8Array(NN);
 let sources=[], objects=[], structures=[], structuresPending=[], currentPreset='montana', terrainDirty=false;
-const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false};
+const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
 /* ---- ruido ---- */
@@ -179,6 +194,7 @@ function bridgeFromPath(path,frac){
 }
 function applyPreset(name){
  currentPreset=name;water.fill(0);sed.fill(0);sedT.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);vX.fill(0);vY.fill(0);wet.fill(0);spd.fill(0);wTmp.fill(0);wVis.fill(0);gateH.fill(0);
+ biome.fill(name==='jardin'?2:0);
  sources=[];objects=[];structuresPending=[];
  const g=name==='valle'?genValle:(name==='jardin'?genJardin:genMontana);
  for(let j=0;j<N;j++)for(let i=0;i<N;i++)terrain[idx(i,j)]=g(i/(N-1),j/(N-1));
@@ -216,7 +232,7 @@ function autoFlora(name){
 }
 /* ================= ESCENA 3D ================= */
 let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bottomMesh;
-let cubeRT=null,cubeCam=null;
+let cubeRT=null,cubeCam=null,sun=null,hemi=null,moon=null;
 let inst={},walls=[];
 let tPos,tNor,tCol,wPos,wNor,wDep,wSpd,wDir,fPos,fAlp,fSize;
 const GLSLN='float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
@@ -235,17 +251,37 @@ function setupScene(){
  scene.fog=new THREE.FogExp2(0xa7c6de,0.0009);
  camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.5,2500);
  skyMesh=new THREE.Mesh(new THREE.SphereGeometry(1000,20,14),new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,
-  uniforms:{sunDir:{value:SUNDIR}},
+  uniforms:{sunDir:{value:SUNDIR},uNight:{value:0},uWarm:{value:0},uMoon:{value:new THREE.Vector3(0,1,0)}},
   vertexShader:'varying vec3 vw;void main(){vw=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-  fragmentShader:'varying vec3 vw;uniform vec3 sunDir;void main(){float h=max(vw.y,0.);vec3 c=mix(vec3(.80,.88,.95),vec3(.24,.51,.86),pow(h,.55));float s=pow(max(dot(vw,sunDir),0.),200.);c+=vec3(1.,.95,.8)*s;float s2=pow(max(dot(vw,sunDir),0.),8.)*.16;c+=vec3(1.,.9,.7)*s2;gl_FragColor=vec4(c,1.);}'}));
+  fragmentShader:'varying vec3 vw;uniform vec3 sunDir;uniform float uNight;uniform float uWarm;uniform vec3 uMoon;\n'+
+   'float h21s(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
+   'void main(){float h=max(vw.y,0.);\n'+
+   'vec3 top=mix(vec3(.24,.51,.86),vec3(.015,.03,.10),uNight);\n'+
+   'vec3 hor=mix(vec3(.80,.88,.95),vec3(.05,.08,.16),uNight);\n'+
+   'hor=mix(hor,vec3(.98,.60,.32),uWarm*.85);\n'+
+   'top=mix(top,vec3(.45,.32,.50),uWarm*.4);\n'+
+   'vec3 c=mix(hor,top,pow(h,.55));\n'+
+   'float s=pow(max(dot(vw,sunDir),0.),200.);\n'+
+   'c+=mix(vec3(1.,.95,.8),vec3(1.,.6,.3),uWarm)*s*(1.-uNight);\n'+
+   'float s2=pow(max(dot(vw,sunDir),0.),8.)*.16*(1.-uNight);\n'+
+   'c+=vec3(1.,.9,.7)*s2;\n'+
+   'float mo=pow(max(dot(vw,uMoon),0.),350.);\n'+
+   'c+=vec3(.85,.9,1.)*mo*uNight*1.2;\n'+
+   'float st=smoothstep(.994,.998,h21s(floor(vw.xy*185.7)+floor(vw.zx*141.3)));\n'+
+   'c+=vec3(st)*uNight*smoothstep(.05,.3,h)*.9;\n'+
+   'gl_FragColor=vec4(c,1.);}'}));
  scene.add(skyMesh);
- scene.add(new THREE.HemisphereLight(0xcfe6ff,0x4a5a3a,0.55));
- const sun=new THREE.DirectionalLight(0xfff1dc,1.05);
+ hemi=new THREE.HemisphereLight(0xcfe6ff,0x4a5a3a,0.55);
+ scene.add(hemi);
+ sun=new THREE.DirectionalLight(0xfff1dc,1.05);
  sun.position.copy(SUNDIR).multiplyScalar(280);
  sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
  const sc=sun.shadow.camera;sc.left=-150;sc.right=150;sc.top=150;sc.bottom=-150;sc.near=20;sc.far=700;
  sun.shadow.bias=-0.0007;
  scene.add(sun);
+ moon=new THREE.DirectionalLight(0x8fa8ff,0);
+ moon.position.set(-150,140,-80);
+ scene.add(moon);
  /* terreno */
  const tg=new THREE.PlaneGeometry(WORLD,WORLD,N-1,N-1);
  tPos=tg.attributes.position.array;tNor=tg.attributes.normal;
@@ -384,16 +420,17 @@ function fastNormals(pos,norAttr){
  norAttr.needsUpdate=true;
 }
 /* ---- colores del terreno (por franjas) ---- */
-const C_G1=[.20,.42,.13],C_G2=[.38,.50,.20],C_RK=[.42,.40,.38],C_SN=[.92,.94,.96],C_SA=[.50,.43,.29],C_MO=[.25,.50,.22];
+const C_RK=[.42,.40,.38],C_SN=[.92,.94,.96],C_SA=[.50,.43,.29];
+const BIO=[[[.20,.42,.13],[.38,.50,.20]],[[.72,.62,.38],[.82,.74,.50]],[[.22,.47,.20],[.30,.53,.26]],[[.72,.75,.80],[.86,.88,.92]]];
 function colorRows(j0,j1){
  for(let j=j0;j<j1;j++)for(let i=0;i<N;i++){const k=idx(i,j);
   const h=terrain[k];
   const hl=terrain[idx(Math.max(0,i-1),j)],hr=terrain[idx(Math.min(N-1,i+1),j)],ht=terrain[idx(i,Math.max(0,j-1))],hb=terrain[idx(i,Math.min(N-1,j+1))];
   const sl=Math.hypot(hr-hl,hb-ht)/(2*CELL);
   const vr=hash2(i*.7,j*.7)*.12;
-  const base=currentPreset==='jardin'?C_MO:C_G1;
+  const bp=BIO[biome[k]],base=bp[0],b2=bp[1];
   const t=clamp(h/34,0,1);
-  let r=base[0]+(C_G2[0]-base[0])*t+vr*.3,g=base[1]+(C_G2[1]-base[1])*t+vr*.4,b=base[2]+(C_G2[2]-base[2])*t;
+  let r=base[0]+(b2[0]-base[0])*t+vr*.3,g=base[1]+(b2[1]-base[1])*t+vr*.4,b=base[2]+(b2[2]-base[2])*t;
   const rk=clamp((sl-.75)/.6,0,1);
   r+=(C_RK[0]-r)*rk;g+=(C_RK[1]-g)*rk;b+=(C_RK[2]-b)*rk;
   if(h>52){const sn=clamp((h-52)/7,0,1)*clamp(1.5-sl,0,1);r+=(C_SN[0]-r)*sn;g+=(C_SN[1]-g)*sn;b+=(C_SN[2]-b)*sn}
@@ -487,7 +524,7 @@ function mergeGeo(parts){
 }
 function TM(x,y,z,s,sy){return new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion(),new THREE.Vector3(s,sy||s,s))}
 function TR(x,y,z,rx,rz,s){return new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,0,rz)),new THREE.Vector3(s,s,s))}
-let objMat=null,grassMesh=null,grassPts=[];
+let objMat=null,grassMesh=null,grassPts=[],lampMesh=null,fishMesh=null,fish=[];
 function buildInstances(){
  objMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9});
  const defs={};
@@ -536,6 +573,73 @@ function buildInstances(){
  grassMesh.count=0;grassMesh.receiveShadow=true;
  grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
  scene.add(grassMesh);
+ lampMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(.5,8,6),new THREE.MeshBasicMaterial({color:0xffd894,transparent:true,opacity:0}),800);
+ lampMesh.count=0;
+ lampMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ scene.add(lampMesh);
+ const fishGeo=mergeGeo([
+  {g:new THREE.ConeGeometry(.20,.72,6),m:TR(0,0,.06,Math.PI/2,0,1),c:[.93,.46,.16]},
+  {g:new THREE.SphereGeometry(.16,6,5),m:TM(0,0,.30,1,.8),c:[.97,.75,.45]},
+  {g:new THREE.ConeGeometry(.15,.34,4),m:TR(0,0,-.40,Math.PI/2,0,1),c:[.90,.38,.12]}]);
+ fishMesh=new THREE.InstancedMesh(fishGeo,objMat,100);
+ fishMesh.count=0;
+ fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ scene.add(fishMesh);
+}
+function spawnFish(){
+ fish=[];
+ const cand=[];
+ for(let j=6;j<N-6;j+=2)for(let i=6;i<N-6;i+=2){const k=idx(i,j);if(water[k]>0.5)cand.push(k)}
+ for(let q=0;q<60&&cand.length;q++){
+  const k=cand[(Math.random()*cand.length)|0];
+  const i=k%N,j=(k/N)|0;
+  fish.push({x:(i/(N-1)-.5)*WORLD,z:(j/(N-1)-.5)*WORLD,dir:Math.random()*6.28,sp:.7+Math.random()*.9,ph:Math.random()*6.28,j:0});
+ }
+}
+function updateFish(dt){
+ if(!fishMesh)return;
+ let n=0;
+ for(let q=fish.length-1;q>=0;q--){const f=fish[q];
+  const fi=clamp(Math.round((f.x/WORLD+.5)*(N-1)),3,N-4),fj=clamp(Math.round((f.z/WORLD+.5)*(N-1)),3,N-4);
+  const k=idx(fi,fj);
+  const d=water[k];
+  if(d<0.08){fish[q]=fish[fish.length-1];fish.pop();continue}
+  if(d<0.4){
+   let bd=d,bi2=0,bj2=0;
+   if(water[k-3]>bd){bd=water[k-3];bi2=-3;bj2=0}
+   if(water[k+3]>bd){bd=water[k+3];bi2=3;bj2=0}
+   if(water[k-3*N]>bd){bd=water[k-3*N];bi2=0;bj2=-3}
+   if(water[k+3*N]>bd){bd=water[k+3*N];bi2=0;bj2=3}
+   if(bd>d)f.dir=Math.atan2(bi2,bj2);
+  }
+  f.dir+=(hash2(f.x*.13+uT*.3,f.z*.17)-.5)*1.8*dt;
+  f.x+=Math.sin(f.dir)*f.sp*dt*3;
+  f.z+=Math.cos(f.dir)*f.sp*dt*3;
+  f.x=clamp(f.x,-WORLD/2+6,WORLD/2-6);f.z=clamp(f.z,-WORLD/2+6,WORLD/2-6);
+  f.ph+=dt*(5+f.sp*3);
+  if(f.j<=0&&d>1.2&&Math.random()<0.0012)f.j=1;
+  let yy=terrain[k]+Math.max(d*.45,Math.min(d-.12,.5));
+  if(f.j>0){
+   yy+=Math.sin((1-f.j)*Math.PI)*1.15;
+   f.j-=dt*1.3;
+   if(f.j<=0)spawnFoam(f.x,terrain[k]+d+.15,f.z,0,.8,0,.5,1.2);
+  }
+  _e.set(0,f.dir+Math.sin(f.ph)*.22,f.j>0?Math.sin((1-f.j)*Math.PI)*.5:0);
+  _q.setFromEuler(_e);
+  _v3.set(f.x,yy,f.z);
+  const s=.75+f.sp*.25;
+  _s3.set(s,s,s);
+  _m4.compose(_v3,_q,_s3);
+  fishMesh.setMatrixAt(n++,_m4);
+ }
+ fishMesh.count=n;
+ fishMesh.instanceMatrix.needsUpdate=true;
+ if(fish.length<50&&(frame%120)===60){
+  for(let t=0;t<40;t++){
+   const i=6+((Math.random()*(N-12))|0),j=6+((Math.random()*(N-12))|0),k=idx(i,j);
+   if(water[k]>0.5){fish.push({x:(i/(N-1)-.5)*WORLD,z:(j/(N-1)-.5)*WORLD,dir:Math.random()*6.28,sp:.7+Math.random()*.9,ph:0,j:0});break}
+  }
+ }
 }
 function scatterGrass(){
  grassPts=[];
@@ -544,6 +648,7 @@ function scatterGrass(){
   const i=3+((Math.random()*(N-6))|0),j=3+((Math.random()*(N-6))|0),k=idx(i,j);
   const h=terrain[k];
   if(h<1.2||h>44)continue;
+  if(biome[k]===1||biome[k]===3)continue;
   const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
   if(sl>0.85)continue;
   if(water[k]>0.02||wet[k]>0.45)continue;
@@ -575,14 +680,22 @@ function terrainHeightAt(x,z){
 const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_e=new THREE.Euler(),_v3=new THREE.Vector3(),_s3=new THREE.Vector3();
 function rebuildObjects(){
  const cnt={};for(const t in inst)cnt[t]=0;
+ let lampN=0;
  for(const o of objects){
   const im=inst[o.type];if(!im||cnt[o.type]>=800)continue;
   const y=terrainHeightAt(o.x,o.z)-0.15;
   _e.set(0,o.ry,0);_q.setFromEuler(_e);_v3.set(o.x,y,o.z);_s3.set(o.s,o.s,o.s);
   _m4.compose(_v3,_q,_s3);
   im.setMatrixAt(cnt[o.type]++,_m4);
+  if(o.type==='farol'&&lampMesh&&lampN<800){
+   _v3.set(o.x,y+1.62*o.s,o.z);
+   _s3.set(o.s*.6,o.s*.5,o.s*.6);
+   _m4.compose(_v3,_q,_s3);
+   lampMesh.setMatrixAt(lampN++,_m4);
+  }
  }
  for(const t in inst){inst[t].count=cnt[t];inst[t].instanceMatrix.needsUpdate=true}
+ if(lampMesh){lampMesh.count=lampN;lampMesh.instanceMatrix.needsUpdate=true}
 }
 function rebuildMarkers(){
  while(markerGroup.children.length)markerGroup.remove(markerGroup.children[0]);
@@ -676,7 +789,7 @@ function onWorldRebuilt(){
  clearStructures();
  for(const p of structuresPending)addStructure(p.kind,p.x,p.z,p.ry,p.open);
  structuresPending=[];
- updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();scatterGrass();foam.length=0;
+ updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();scatterGrass();spawnFish();foam.length=0;
 }
 /* ================= SIMULACIÓN ================= */
 const DT=0.14,DAMP=0.985,GK=9.81*0.55;
@@ -703,7 +816,7 @@ function simStep(){
   const inF=(i>0?fR[k-1]:0)+(i<N-1?fL[k+1]:0)+(j>0?fB[k-N]:0)+(j<N-1?fT[k+N]:0);
   const outF=fL[k]+fR[k]+fT[k]+fB[k];
   let w=water[k]+dt*(inF-outF)/CA;
-  w*=0.9993;
+  w*=biome[k]===1?0.9975:0.9993;
   water[k]=w<1e-4?0:Math.min(w,30);
   const dm=Math.max(water[k],0.05);
   const dwx=((i>0?fR[k-1]:0)-fL[k]+fR[k]-(i<N-1?fL[k+1]:0))*.5;
@@ -810,8 +923,10 @@ function foamUpdate(dt){
 /* ================= GUARDAR / CARGAR / DESHACER ================= */
 function f32b64(a){const u=new Uint8Array(a.buffer.slice(0));let s='';const CH=32768;for(let o=0;o<u.length;o+=CH)s+=String.fromCharCode.apply(null,u.subarray(o,o+CH));return btoa(s)}
 function b64f32(s){const b=atob(s),u=new Uint8Array(b.length);for(let q=0;q<b.length;q++)u[q]=b.charCodeAt(q);return new Float32Array(u.buffer)}
+function u8b64(a){let s='';const CH=32768;for(let o=0;o<a.length;o+=CH)s+=String.fromCharCode.apply(null,a.subarray(o,o+CH));return btoa(s)}
+function b64u8(s){const b=atob(s),u=new Uint8Array(b.length);for(let q=0;q<b.length;q++)u[q]=b.charCodeAt(q);return u}
 function serializeGame(){
- return JSON.stringify({v:2,N:N,preset:currentPreset,terrain:f32b64(terrain),water:f32b64(water),
+ return JSON.stringify({v:2,N:N,preset:currentPreset,terrain:f32b64(terrain),water:f32b64(water),biome:u8b64(biome),
   sources:sources,objects:objects,
   structures:structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open}))});
 }
@@ -820,6 +935,7 @@ function restoreGame(data){
  terrain.set(b64f32(data.terrain));
  const wv=b64f32(data.water);
  currentPreset=data.preset||'montana';
+ if(data.biome)biome.set(b64u8(data.biome));else biome.fill(0);
  sources=data.sources||[];objects=data.objects||[];
  structuresPending=(data.structures||[]).slice();
  fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);sedT.fill(0);vX.fill(0);vY.fill(0);spd.fill(0);wet.fill(0);wVis.fill(0);wTmp.fill(0);
@@ -840,13 +956,14 @@ function saveToFile(){
 const UNDO_MAX=12;let undoStack=[];
 function pushUndo(){
  if(undoStack.length>=UNDO_MAX)undoStack.shift();
- undoStack.push({t:new Float32Array(terrain),s:JSON.stringify(sources),o:JSON.stringify(objects),
+ undoStack.push({t:new Float32Array(terrain),b:new Uint8Array(biome),s:JSON.stringify(sources),o:JSON.stringify(objects),
   st:JSON.stringify(structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open})))});
 }
 function doUndo(){
  const u=undoStack.pop();
  if(!u)return;
  terrain.set(u.t);
+ if(u.b)biome.set(u.b);
  sources=JSON.parse(u.s);objects=JSON.parse(u.o);
  structuresPending=JSON.parse(u.st);
  onWorldRebuilt();
@@ -881,7 +998,7 @@ function hitTerrain(ev){
  return h.length?h[0].point:null;
 }
 const CLICK_TOOLS={fuente:1,roca:1,pino:1,cerezo:1,bambu:1,arbusto:1,farol:1,puente:1,compuerta:1};
-const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1};
+const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
  if(ev.target!==renderer.domElement)return;
  ev.preventDefault();
@@ -970,6 +1087,13 @@ function applyBrush(dt){
   if(chg)rebuildGateField();
   return;
  }
+ if(P.tool==='bioma'){
+  for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+   if(Math.hypot(i-ci,j-cj)<=r)biome[idx(i,j)]=P.biome;
+  }
+  colorRows(Math.max(0,j0-1),Math.min(N,j1+2));
+  return;
+ }
  let avg=0,cnt=0;
  if(P.tool==='aplanar'){for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){if(Math.hypot(i-ci,j-cj)<=r){avg+=terrain[idx(i,j)];cnt++}}avg/=Math.max(cnt,1)}
  for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
@@ -1025,7 +1149,28 @@ function photoMode(){
  }
 }
 /* ================= UI ================= */
-const HINTS={mirar:'Arrastra para orbitar. Acércate con la rueda hasta ver los arroyos de cerca.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra para tu jardín zen.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.'};
+const HINTS={mirar:'Arrastra para orbitar. Acércate con la rueda hasta ver los arroyos de cerca.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.'};
+let dayTime=100/240;
+function applyDayTime(){
+ const th=(dayTime-.25)*6.28318;
+ const sy=Math.sin(th);
+ const dayF=clamp(sy*2.2+.12,0,1);
+ const warm=clamp(1-Math.abs(sy)*2.8,0,1)*clamp(sy*8+.6,0,1);
+ SUNDIR.set(Math.cos(th)*.62,Math.max(sy,.04),.35).normalize();
+ sun.position.copy(SUNDIR).multiplyScalar(280);
+ sun.intensity=.05+1.05*dayF;
+ sun.color.setRGB(1,.96-.34*warm,.88-.55*warm);
+ hemi.intensity=.10+.46*dayF;
+ moon.intensity=.20*(1-dayF);
+ const r=.04+.61*dayF+.28*warm,g=.07+.71*dayF+.05*warm,b=.13+.74*dayF-.10*warm;
+ scene.fog.color.setRGB(r,g,b);
+ waterMesh.material.uniforms.fogC.value.setRGB(r,g,b);
+ const su=skyMesh.material.uniforms;
+ su.uNight.value=1-dayF;
+ su.uWarm.value=warm;
+ su.uMoon.value.set(-SUNDIR.x,Math.max(.3,.5-sy),-SUNDIR.z).normalize();
+ if(lampMesh)lampMesh.material.opacity=clamp(1.1-dayF*1.5,0,1)*.95;
+}
 function bindUI(){
  const $=id=>document.getElementById(id);
  document.querySelectorAll('.tools button').forEach(b=>b.addEventListener('click',()=>{
@@ -1044,6 +1189,12 @@ function bindUI(){
  $('sSpeed').addEventListener('input',e=>{P.speed=+e.target.value/10;$('vSpeed').textContent=P.speed.toFixed(1)});
  $('tEro').addEventListener('change',e=>P.erosion=e.target.checked);
  $('tRain').addEventListener('change',e=>P.rain=e.target.checked);
+ $('sHour').addEventListener('input',e=>{dayTime=+e.target.value/240;$('vHour').textContent=Math.floor(dayTime*24)+'h';applyDayTime()});
+ $('tCycle').addEventListener('change',e=>P.cycle=e.target.checked);
+ document.querySelectorAll('.bios .bio').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.bios .bio').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel');P.biome=+b.dataset.b;
+ }));
  $('tSnd').addEventListener('change',e=>{P.sound=e.target.checked;if(P.sound)audioOn();else audioOff()});
  $('bReset').addEventListener('click',()=>{undoStack=[];applyPreset(currentPreset)});
  $('bDry').addEventListener('click',()=>{water.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);spd.fill(0)});
@@ -1077,6 +1228,7 @@ function bindUI(){
  cv.addEventListener('contextmenu',e=>e.preventDefault());
  cv.addEventListener('dblclick',e=>{const p=hitTerrain(e);if(p){camG.tx=clamp(p.x,-130,130);camG.ty=p.y+2;camG.tz=clamp(p.z,-130,130);camG.rad=Math.max(20,camG.rad*.55)}});
  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+ applyDayTime();
 }
 /* ================= BUCLE ================= */
 let lastT=performance.now(),fpsA=60,frame=0,uT=0,autosaveT=0;
@@ -1090,6 +1242,16 @@ function loop(){
  for(let q=0;q<steps;q++)simStep();
  applyBrush(dtr);
  animateStructures(dtr);
+ updateFish(dtr);
+ if(P.cycle){
+  dayTime=(dayTime+dtr/150)%1;
+  applyDayTime();
+  if(frame%30===0){
+   const sh=document.getElementById('sHour');
+   sh.value=Math.round(dayTime*240);
+   document.getElementById('vHour').textContent=Math.floor(dayTime*24)+'h';
+  }
+ }
  if(terrainDirty&&frame%4===0){updateTerrainMesh();terrainDirty=false}
  updateWaterMesh();
  foamUpdate(dtr);
