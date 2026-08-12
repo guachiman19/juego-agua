@@ -6,29 +6,29 @@ Archivo de contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Ch
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma del producto y del proyecto: español.
 
-## Estado actual (2026-08-05)
+## Estado actual: v2 (2026-08-05)
 
-- v1 funcional verificada en Chromium headless: sin errores de consola, 58 fps en vista general (software rendering).
-- Repo GitHub: `guachiman19/juego-agua` (rama `main`). Staging: GitHub Pages desde main. Producción: NO desplegada, requiere OK explícito de Jaime. Vercel MCP con token expirado y el item de 1Password "Vercel access token (chatbot)" está vacío.
-- El PAT "GitHub API token for Claude" de 1Password NO tiene acceso a este repo (fine-grained restringido), los commits se hacen vía conector Composio GitHub.
-- index.html del repo referencia Three.js r128 desde cdnjs. Existe variante autocontenida (three.js incrustado, ~640 KB) generada para entregas offline/artifacts.
+- v2 verificada en Chromium headless: 0 errores de consola, 58 fps vista general y 22-28 fps en primer plano con software rendering (en GPU real irá mucho mejor).
+- Novedades v2: malla 256x256 (4x resolución), física visible del caudal (rizado y vetas por velocidad, lagos espejo, splash al pie de cascadas), puentes rojos auto-orientados al cauce, compuertas que bloquean el flujo (clic abre/cierra), bambú y arbustos, guardar/cargar a archivo JSON + autosave localStorage, deshacer (12 niveles, Ctrl+Z), warmup de simulación al cargar preset (el río ya fluye al abrir).
+- Repo GitHub: `guachiman19/juego-agua` (rama `main`). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/. Producción: NO desplegada, requiere OK explícito de Jaime. Vercel MCP con token expirado y el item de 1Password "Vercel access token (chatbot)" está vacío.
+- El PAT "GitHub API token for Claude" de 1Password NO tiene acceso a este repo (fine-grained restringido), los commits se hacen vía conector Composio GitHub. Verificar integridad con sha256 contra raw.githubusercontent tras cada push.
+- index.html del repo referencia Three.js r128 desde cdnjs. Variante autocontenida (three.min.js de npm three@0.128.0 incrustado, ~650 KB) para entregas offline/artifacts.
 
 ## Arquitectura (todo en index.html)
 
-- Grid 128x128 sobre mundo de 220x220 unidades. Arrays tipados: terrain, water, sed, flujos fL/fR/fT/fB, velocidades vX/vY, wet, wVis.
-- Simulación: modelo de tuberías (Mei et al.) con DT=0.14, DAMP=0.985, clamp K por volumen disponible, difusión ligera (0.88/0.03) contra oscilación en tablero, evaporación 0.9993, drenaje en bordes.
-- Erosión: capacidad Kc=0.05 * velocidad * pendiente * min(d,1.5), erosión 0.045 (cap 0.018/paso), depósito 0.12, advección semi-lagrangiana de sedimento. Protegida cerca de manantiales (radio 3).
-- Render: Three.js r128. Terreno MeshStandard con vertex colors (césped/roca/nieve>52/arena húmeda vía wet). Agua con ShaderMaterial custom (fresnel, especular, niebla manual, alpha por vértice). Trucos visuales: wVis (suavizado temporal + max vecinos*0.3), lift +0.12 y alpha mínima 0.5 con profundidad>0.025, velocidad suavizada para espuma. Espuma: Points con shader (máx 900). Paredes de diorama + caja inferior. Skydome con shader.
-- Objetos: InstancedMesh por tipo (pino, cerezo, roca, farol) con geometrías fusionadas (mergeGeo). Las rocas hacen bump al terreno (rockBump). Manantiales con marcador esfera+anillo emisivos.
-- Presets: genMontana/genValle/genJardin (fbm + gaussianas), carveChannel talla el cauce inicial por descenso más empinado desde cada manantial. Jardín trae decoración precolocada y erosión off.
-- Cámara: orbital propia con damping, target pegado al terreno, colisión cámara-terreno, pan con Shift, pinch táctil básico, doble clic centra.
-- UI en español: panel glass, 11 herramientas, sliders (pincel/intensidad/velocidad), toggles (erosión/lluvia/sonido), presets, pausa/vaciar/reiniciar. Sonido: ruido browniano filtrado según velocidad media del agua.
+- Grid 256x256 sobre mundo de 220x220. Arrays tipados: terrain, water, sed, flujos fL/fR/fT/fB, vX/vY, wet, spd, wVis, wTmp, gateH.
+- Simulación: modelo de tuberías con DT=0.14, DAMP=0.985, clamp K por volumen, difusión 0.88/0.03, evaporación 0.9993, drenaje en bordes. Las compuertas suman gateH al terreno efectivo del cálculo de flujos. Erosión cada 2 substeps (dt doble), protegida cerca de manantiales (radio 6) y bajo compuertas.
+- Render: normales por diferencias finitas (fastNormals, nada de computeVertexNormals), colores de terreno por franjas rotativas (1/8 por frame). Agua ShaderMaterial con atributos aCol/aAlpha/aSpd/aDir: amplitud de rizado según velocidad (lagos espejo, rápidos agitados), vetas de corriente advectadas en dirección del flujo, especular variable, gate de alpha para no brillar en celdas secas. Espuma/salpicaduras: Points con tamaño por partícula (máx 2000), spray en rápidos y splash radial al pie de cascadas (drop>3.5 detectado por vecino alto vertiendo).
+- carveChannel: camina el descenso sobre terreno intacto y talla después (dos fases, evita atascarse en su propio pozo). carveTo: cauce garantizado entre dos puntos con meandro, lecho monótono 1.2 bajo el terreno local calculado en pasada previa (evita retroalimentación). bridgeFromPath coloca puente sobre el path con orientación del segmento.
+- Presets: montaña (río desde cumbre + puente), valle (2 fuentes + puente), jardín (arroyo manantial->estanque + puente + bambú/arbustos/faroles/cerezos). Warmup 170 substeps (jardín 340) dentro de applyPreset.
+- Estructuras: puentes y compuertas como THREE.Group individuales (no instanced), reposicionadas al terreno cada 12 frames. Compuerta: panel animado, rebuildGateField escribe muro de 9*t en gateH transversal al flujo. flowRotAt orienta según vX/vY local.
+- Guardar: serializeGame JSON con Float32 en base64 (f32b64/b64f32), botón descarga archivo + localStorage autosave cada 25 s. Cargar: file picker (Shift+clic restaura autosave). Deshacer: pila de 12 snapshots (terrain + objetos + fuentes + estructuras), Ctrl+Z, se limpia al cambiar preset.
+- Cámara orbital propia: target pegado al terreno, colisión con terreno, pan Shift, pinch, doble clic centra.
 
 ## Build y verificación (sesión Cowork)
 
-- Fuentes en parts/: p1.html (HTML+CSS+UI+núcleo+presets), p2.js (escena/render), p3.js (objetos+simulación+espuma), p4.js (cámara/entrada/UI/bucle). index.html = concatenación p1+p2+p3+p4.
-- Variante autocontenida: reemplazar la línea del CDN por three.min.js inline (npm three@0.128.0).
-- Verificación: verify.js con Playwright (Chromium headless + swiftshader), capturas de montaña, zoom y jardín.
+- Fuentes en parts/: p1.html (HTML+CSS+núcleo+presets+carve), p2.js (escena/shaders/normales/colores), p3.js (objetos+estructuras+sim+espuma+guardado+undo), p4.js (cámara/entrada/UI/bucle). index.html = concatenación.
+- verify.js: 3 capturas (montaña, zoom, jardín). verify2.js: compuerta sobre el río, serializeGame y undo.
 
 ## Convenciones del proyecto
 
@@ -39,5 +39,5 @@ Archivo de contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Ch
 
 ## Pendientes / ideas
 
-- Reconectar Vercel (o guardar token válido en 1Password) para staging/producción en Vercel cuando Jaime lo pida.
-- Posibles mejoras: puentes y compuertas, ciclo día/noche, guardado de escenas (sin localStorage en artifacts), modo pintura de biomas, más partículas en cascadas, undo.
+- Reconectar Vercel (o guardar token válido en 1Password) si Jaime quiere staging/producción en Vercel.
+- Ideas v3: ciclo día/noche, biomas pintables, peces/animales, más tipos de puente, compartir escenas por URL, modo foto.
