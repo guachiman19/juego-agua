@@ -70,6 +70,7 @@
  <div class="sec">Ajustes</div>
  <div class="sl"><label>Pincel</label><input id="sBrush" type="range" min="4" max="34" step="1" value="14"/><b id="vBrush">14</b></div>
  <div class="sl"><label>Intensidad</label><input id="sStr" type="range" min="10" max="100" step="1" value="55"/><b id="vStr">55</b></div>
+ <div class="sl"><label>Caudal</label><input id="sFlow" type="range" min="20" max="300" step="5" value="100"/><b id="vFlow">x1.0</b></div>
  <div class="sl"><label>Velocidad</label><input id="sSpeed" type="range" min="0" max="30" step="1" value="10"/><b id="vSpeed">1.0</b></div>
  <label class="tg"><input id="tEro" type="checkbox" checked/> Erosión del terreno</label>
  <label class="tg"><input id="tRain" type="checkbox"/> Lluvia</label>
@@ -99,7 +100,7 @@ const terrain=new Float32Array(NN), water=new Float32Array(NN), sed=new Float32A
 const fL=new Float32Array(NN), fR=new Float32Array(NN), fT=new Float32Array(NN), fB=new Float32Array(NN);
 const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN), spd=new Float32Array(NN), wTmp=new Float32Array(NN), wVis=new Float32Array(NN), gateH=new Float32Array(NN);
 let sources=[], objects=[], structures=[], structuresPending=[], currentPreset='montana', terrainDirty=false;
-const P={tool:'mirar', brush:14, strength:0.55, speed:1, erosion:true, rain:false, sound:false, paused:false};
+const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
 /* ---- ruido ---- */
@@ -219,7 +220,7 @@ let tPos,tNor,tCol,wPos,wNor,wDep,wSpd,wDir,fPos,fAlp,fSize;
 const GLSLN='float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
 'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
 ' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
-'float fbm2(vec2 p){return .5*vn2(p)+.25*vn2(p*2.13)+.125*vn2(p*4.31);}\n';
+'float fbm2(vec2 p){mat2 R=mat2(.8,-.6,.6,.8);float s=.5*vn2(p);p=R*p*2.13;s+=.25*vn2(p);p=R*p*2.07;s+=.125*vn2(p);p=R*p*1.93;s+=.0625*vn2(p);return s*1.07;}\n';
 const SUNDIR=new THREE.Vector3(.55,.75,.35).normalize();
 const MAXFOAM=2000;let foam=[];
 function setupScene(){
@@ -278,7 +279,7 @@ function setupScene(){
    'float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
    'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
    ' return mix(mix(h21(i),h21(i+vec2(1.,0.)),u.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),u.x),u.y);}\n'+
-   'float fbm2(vec2 p){return .5*vn2(p)+.25*vn2(p*2.13)+.125*vn2(p*4.31);}\n'+
+   'float fbm2(vec2 p){mat2 R=mat2(.8,-.6,.6,.8);float s=.5*vn2(p);p=R*p*2.13;s+=.25*vn2(p);p=R*p*2.07;s+=.125*vn2(p);p=R*p*1.93;s+=.0625*vn2(p);return s*1.07;}\n'+
    'void main(){\n'+
    'vec2 dir=length(vD)>.05?normalize(vD):vec2(0.,1.);\n'+
    'float spN=clamp(vS/4.,0.,1.);\n'+
@@ -327,8 +328,8 @@ function setupScene(){
  fg2.setAttribute('aA',new THREE.BufferAttribute(fAlp,1));
  fg2.setAttribute('aS',new THREE.BufferAttribute(fSize,1));
  foamPts=new THREE.Points(fg2,new THREE.ShaderMaterial({transparent:true,depthWrite:false,
-  vertexShader:'attribute float aA;attribute float aS;varying float vA;void main(){vA=aA;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(aS*170./max(-mv.z,1.),1.2,26.);gl_Position=projectionMatrix*mv;}',
-  fragmentShader:'varying float vA;void main(){vec2 q=gl_PointCoord-.5;float r=length(q);float a=smoothstep(.5,.10,r)*vA;gl_FragColor=vec4(1.,1.,1.,a*.85);}'}));
+  vertexShader:'attribute float aA;attribute float aS;varying float vA;void main(){vA=aA;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(aS*170./max(-mv.z,1.),1.2,18.);gl_Position=projectionMatrix*mv;}',
+  fragmentShader:'varying float vA;void main(){vec2 q=gl_PointCoord-.5;float r=length(q);float a=smoothstep(.5,.15,r)*vA;gl_FragColor=vec4(1.,1.,1.,a*.8);}'}));
  foamPts.renderOrder=3;scene.add(foamPts);
  markerGroup=new THREE.Group();scene.add(markerGroup);
  buildInstances();
@@ -421,8 +422,16 @@ function updateWaterMesh(){
   const sl2=i>0?spd[k-1]:0,sr2=i<N-1?spd[k+1]:0,st2=j>0?spd[k-N]:0,sb2=j<N-1?spd[k+N]:0;
   const s=(spd[k]*2+sl2+sr2+st2+sb2)/6;
   const vis=d>0.012;
-  wPos[k*3+1]=vis?terrain[k]+d+0.04:terrain[k]-0.35;
-  wDep[k]=vis?d:0;
+  if(vis){wPos[k*3+1]=terrain[k]+d+0.04;wDep[k]=d}
+  else{
+   let ms=1e9;
+   if(i>0&&wVis[k-1]>0.012){const s2=terrain[k-1]+wVis[k-1];if(s2<ms)ms=s2}
+   if(i<N-1&&wVis[k+1]>0.012){const s2=terrain[k+1]+wVis[k+1];if(s2<ms)ms=s2}
+   if(j>0&&wVis[k-N]>0.012){const s2=terrain[k-N]+wVis[k-N];if(s2<ms)ms=s2}
+   if(j<N-1&&wVis[k+N]>0.012){const s2=terrain[k+N]+wVis[k+N];if(s2<ms)ms=s2}
+   wPos[k*3+1]=ms<1e8?ms-0.02:terrain[k]-0.35;
+   wDep[k]=0;
+  }
   wSpd[k]=s;
   wDir[k*2]=vX[k];wDir[k*2+1]=vY[k];
  }
@@ -557,8 +566,8 @@ function rebuildMarkers(){
  while(markerGroup.children.length)markerGroup.remove(markerGroup.children[0]);
  for(const s of sources){
   const x=(s.i/(N-1)-.5)*WORLD,z=(s.j/(N-1)-.5)*WORLD,y=terrain[idx(s.i,s.j)];
-  const m=new THREE.Mesh(new THREE.SphereGeometry(.62,10,8),new THREE.MeshStandardMaterial({color:0x8fe8ff,emissive:0x2fa8d8,emissiveIntensity:.55,roughness:.25,transparent:true,opacity:.85}));
-  m.position.set(x,y+.28,z);markerGroup.add(m);
+  const m=new THREE.Mesh(new THREE.SphereGeometry(.45,10,8),new THREE.MeshStandardMaterial({color:0x8fe8ff,emissive:0x2fa8d8,emissiveIntensity:.5,roughness:.25,transparent:true,opacity:.55}));
+  m.position.set(x,y+.12,z);markerGroup.add(m);
  }
 }
 /* ================= ESTRUCTURAS: puentes y compuertas ================= */
@@ -652,9 +661,9 @@ const DT=0.14,DAMP=0.985,GK=9.81*0.55;
 let eroTick=0;
 function simStep(){
  const dt=DT,gd=GK*dt;
- for(const s of sources){const k=idx(s.i,s.j);
-  water[k]+=s.rate*dt*.8;
-  water[k-1]+=s.rate*dt*.2;water[k+1]+=s.rate*dt*.2;water[k-N]+=s.rate*dt*.2;water[k+N]+=s.rate*dt*.2;
+ for(const s of sources){const k=idx(s.i,s.j);const rr=s.rate*P.flow*dt;
+  water[k]+=rr*.8;
+  water[k-1]+=rr*.2;water[k+1]+=rr*.2;water[k-N]+=rr*.2;water[k+N]+=rr*.2;
  }
  if(P.rain){for(let k=0;k<NN;k++)water[k]+=0.016*dt}
  for(let j=0;j<N;j++)for(let i=0;i<N;i++){const k=idx(i,j);
@@ -689,6 +698,17 @@ function simStep(){
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);water[k]=wTmp[k]}
  eroTick++;
  if(P.erosion&&(eroTick&1))erode(dt*2);
+ if((eroTick&3)===0)relaxSlopes();
+}
+function relaxSlopes(){
+ for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
+  const dR=terrain[k]-terrain[k+1];
+  if(dR>3.2){const m=(dR-3.2)*.08;terrain[k]-=m;terrain[k+1]+=m;terrainDirty=true}
+  else if(dR<-3.2){const m=(-dR-3.2)*.08;terrain[k]+=m;terrain[k+1]-=m;terrainDirty=true}
+  const dB=terrain[k]-terrain[k+N];
+  if(dB>3.2){const m=(dB-3.2)*.08;terrain[k]-=m;terrain[k+N]+=m;terrainDirty=true}
+  else if(dB<-3.2){const m=(-dB-3.2)*.08;terrain[k]+=m;terrain[k+N]-=m;terrainDirty=true}
+ }
 }
 function nearSource(i,j){for(const s of sources){if(Math.abs(s.i-i)<6&&Math.abs(s.j-j)<6)return true}return false}
 function erode(dt){
@@ -700,7 +720,7 @@ function erode(dt){
   const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
   const tilt=Math.max(.1,sl/Math.sqrt(1+sl*sl));
   const cap=Kc*spd[k]*tilt*Math.min(d,1.5);
-  if(cap>sed[k]){if(!nearSource(i,j)){const e=Math.min((cap-sed[k])*.045,.018);terrain[k]-=e;sed[k]+=e;terrainDirty=true}}
+  if(cap>sed[k]){if(!nearSource(i,j)&&terrain[k]>((terrain[k-1]+terrain[k+1]+terrain[k-N]+terrain[k+N])*.25-2.5)){const e=Math.min((cap-sed[k])*.045,.018);terrain[k]-=e;sed[k]+=e;terrainDirty=true}}
   else{const dp=Math.min((sed[k]-cap)*.12,sed[k]);terrain[k]+=dp;sed[k]-=dp;if(dp>1e-5)terrainDirty=true}
  }
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
@@ -717,25 +737,37 @@ function spawnFoam(x,y,z,vx,vy,vz,ml,size){
  foam.push({x:x,y:y,z:z,vx:vx,vy:vy,vz:vz,l:0,ml:ml,sz:size});
 }
 function foamUpdate(dt){
+ const cpx=camera?camera.position.x:0,cpy=camera?camera.position.y:0,cpz=camera?camera.position.z:0;
+ for(const s of sources){
+  if(foam.length>=MAXFOAM-2)break;
+  if(Math.random()<0.55){
+   const k2=idx(s.i,s.j),x2=(s.i/(N-1)-.5)*WORLD,z2=(s.j/(N-1)-.5)*WORLD;
+   spawnFoam(x2+(Math.random()-.5)*1.5,terrain[k2]+water[k2]+.12,z2+(Math.random()-.5)*1.5,(Math.random()-.5)*.4,.5+Math.random()*.9,(Math.random()-.5)*.4,.4+Math.random()*.4,.5);
+  }
+ }
  for(let n=0;n<520&&foam.length<MAXFOAM-4;n++){
   const i=2+((Math.random()*(N-4))|0),j=2+((Math.random()*(N-4))|0),k=idx(i,j);
   const d=water[k],s=spd[k];if(d<0.03)continue;
   const x=(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,z=(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL;
   const hh=terrain[k]+d;
+  const dcx=cpx-x,dcy=cpy-hh,dcz=cpz-z;
+  const dCam=Math.sqrt(dcx*dcx+dcy*dcy+dcz*dcz);
+  const fz=dCam<70?0.55:1;
   let drop=0;
   const nb=[k-1,k+1,k-N,k+N];
   for(const q of nb){const dh=(terrain[q]+water[q])-hh;if(water[q]>0.02&&dh>drop)drop=dh}
   if(drop>3.5&&d>0.04){
    const pw=Math.min(1,drop/12);
-   for(let m=0;m<3;m++){
+   const cnt=dCam<70?5:3;
+   for(let m=0;m<cnt;m++){
     const a=Math.random()*6.28,rr=1+Math.random()*2.2;
-    spawnFoam(x+Math.cos(a)*.6,hh+.3,z+Math.sin(a)*.6,Math.cos(a)*rr,2.2+Math.random()*2.5*pw,Math.sin(a)*rr,.6+Math.random()*.5,1.6+pw*1.4);
+    spawnFoam(x+Math.cos(a)*.6,hh+.3,z+Math.sin(a)*.6,Math.cos(a)*rr,2.2+Math.random()*2.5*pw,Math.sin(a)*rr,.6+Math.random()*.5,(1.6+pw*1.4)*fz);
    }
    continue;
   }
   const ss=Math.hypot((terrain[k+1]+water[k+1])-(terrain[k-1]+water[k-1]),(terrain[k+N]+water[k+N])-(terrain[k-N]+water[k-N]))/(2*CELL);
   if(s>2.6||(s>1.2&&ss>0.9)){
-   spawnFoam(x,hh+.15,z,vX[k]*.5+(Math.random()-.5),.8+Math.random(),vY[k]*.5+(Math.random()-.5),.5+Math.random()*.7,1);
+   spawnFoam(x,hh+.15,z,vX[k]*.5+(Math.random()-.5),.8+Math.random(),vY[k]*.5+(Math.random()-.5),.5+Math.random()*.7,fz);
   }
  }
  for(let q=foam.length-1;q>=0;q--){const f=foam[q];
@@ -961,6 +993,7 @@ function bindUI(){
  }));
  $('sBrush').addEventListener('input',e=>{P.brush=+e.target.value;$('vBrush').textContent=e.target.value});
  $('sStr').addEventListener('input',e=>{P.strength=+e.target.value/100;$('vStr').textContent=e.target.value});
+ $('sFlow').addEventListener('input',e=>{P.flow=+e.target.value/100;$('vFlow').textContent='x'+P.flow.toFixed(1)});
  $('sSpeed').addEventListener('input',e=>{P.speed=+e.target.value/10;$('vSpeed').textContent=P.speed.toFixed(1)});
  $('tEro').addEventListener('change',e=>P.erosion=e.target.checked);
  $('tRain').addEventListener('change',e=>P.rain=e.target.checked);
