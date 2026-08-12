@@ -81,6 +81,7 @@
   <button id="bUndo">↶ Deshacer</button>
  </div>
  <div class="btnrow">
+  <button id="bPhoto">📷 Foto</button>
   <button id="bReset">↺ Reiniciar</button>
   <button id="bDry">🏜️ Vaciar</button>
   <button id="bPause">⏸</button>
@@ -215,6 +216,7 @@ function autoFlora(name){
 }
 /* ================= ESCENA 3D ================= */
 let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bottomMesh;
+let cubeRT=null,cubeCam=null;
 let inst={},walls=[];
 let tPos,tNor,tCol,wPos,wNor,wDep,wSpd,wDir,fPos,fAlp,fSize;
 const GLSLN='float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
@@ -269,12 +271,15 @@ function setupScene(){
  wg.setAttribute('aDepth',new THREE.BufferAttribute(wDep,1));
  wg.setAttribute('aSpd',new THREE.BufferAttribute(wSpd,1));
  wg.setAttribute('aDir',new THREE.BufferAttribute(wDir,2));
+ cubeRT=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+ cubeCam=new THREE.CubeCamera(1,1500,cubeRT);
+ scene.add(cubeCam);
  waterMesh=new THREE.Mesh(wg,new THREE.ShaderMaterial({transparent:true,
-  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009}},
+  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uEnv:{value:cubeRT.texture}},
   vertexShader:'attribute float aDepth;attribute float aSpd;attribute vec2 aDir;\n'+
    'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
    'void main(){vN=normal;vDep=aDepth;vS=aSpd;vD=aDir;vec4 wp=modelMatrix*vec4(position,1.);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}',
-  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;\n'+
+  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform samplerCube uEnv;\n'+
    'varying vec3 vN;varying vec3 vW;varying float vDep;varying float vS;varying vec2 vD;\n'+
    'float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
    'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
@@ -300,7 +305,10 @@ function setupScene(){
    'float dif=.45+.55*max(dot(n,sunDir),0.);\n'+
    'col*=dif;\n'+
    'float fr=pow(1.-max(dot(n,V),0.),3.);\n'+
-   'col=mix(col,vec3(.58,.74,.90),fr*.65);\n'+
+   'vec3 Rv=reflect(-V,n);\n'+
+   'vec3 envc=textureCube(uEnv,Rv).rgb;\n'+
+   'envc=mix(envc,vec3(.58,.74,.90),clamp(spN*.7,0.,.8));\n'+
+   'col=mix(col,envc,fr*mix(.78,.45,spN));\n'+
    'float spq=pow(max(dot(reflect(-sunDir,n),V),0.),mix(240.,48.,spN));\n'+
    'col+=vec3(1.,.98,.9)*spq*.9;\n'+
    'float foamN=mix(fbm2(uv1*3.3+7.7),fbm2(uv2*3.3+7.7),blend);\n'+
@@ -409,6 +417,20 @@ function updateTerrainMesh(){
  terrainMesh.geometry.attributes.position.needsUpdate=true;
  fastNormals(tPos,tNor);
  updateWalls();
+}
+/* ---- reflejo del entorno: cubemap dinamico centrado sobre el agua ---- */
+function updateEnvMap(){
+ if(!cubeCam)return;
+ let sx=0,sz=0,sw=0,sy=0;
+ for(let j=4;j<N-4;j+=8)for(let i=4;i<N-4;i+=8){const k=idx(i,j);
+  const w=water[k];
+  if(w>0.4){sx+=i*w;sz+=j*w;sy+=(terrain[k]+w)*w;sw+=w}
+ }
+ if(sw>1){cubeCam.position.set((sx/sw/(N-1)-.5)*WORLD,sy/sw+2.5,(sz/sw/(N-1)-.5)*WORLD)}
+ else cubeCam.position.set(0,14,0);
+ waterMesh.visible=false;foamPts.visible=false;markerGroup.visible=false;
+ cubeCam.update(renderer,scene);
+ waterMesh.visible=true;foamPts.visible=true;markerGroup.visible=true;
 }
 /* ---- malla de agua: profundidad, velocidad y direccion al shader ---- */
 function updateWaterMesh(){
@@ -977,6 +999,31 @@ function audioOn(){
  actx.resume();
 }
 function audioOff(){if(gnode&&actx)gnode.gain.setTargetAtTime(0,actx.currentTime,.2)}
+/* ================= MODO FOTO ================= */
+function photoMode(){
+ const ids=['panel','hint','stats','pbtn'];
+ const els=ids.map(id=>document.getElementById(id));
+ els.forEach(e=>{if(e)e.style.visibility='hidden'});
+ updateEnvMap();
+ const w=innerWidth,h=innerHeight;
+ const scale=Math.min(2,4096/Math.max(w,h));
+ renderer.setSize(w*scale,h*scale,false);
+ renderer.render(scene,camera);
+ let url=null;
+ try{url=renderer.domElement.toDataURL('image/png')}catch(e){}
+ renderer.setSize(w,h,false);
+ els.forEach(e=>{if(e)e.style.visibility=''});
+ if(url){
+  const bin=atob(url.split(',')[1]);
+  const arr=new Uint8Array(bin.length);
+  for(let q=0;q<bin.length;q++)arr[q]=bin.charCodeAt(q);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([arr],{type:'image/png'}));
+  a.download='nacimiento-foto.png';a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  document.getElementById('hint').textContent='Foto guardada en tus descargas.';
+ }
+}
 /* ================= UI ================= */
 const HINTS={mirar:'Arrastra para orbitar. Acércate con la rueda hasta ver los arroyos de cerca.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra para tu jardín zen.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.'};
 function bindUI(){
@@ -1016,7 +1063,11 @@ function bindUI(){
   rd.readAsText(f);e.target.value='';
  });
  $('bUndo').addEventListener('click',doUndo);
- window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();doUndo()}});
+ $('bPhoto').addEventListener('click',photoMode);
+ window.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();doUndo();return}
+  if(e.key.toLowerCase()==='f'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){photoMode()}
+ });
  $('pbtn').addEventListener('click',()=>{$('panel').classList.toggle('off');$('pbtn').classList.toggle('off')});
  const cv=renderer.domElement;
  cv.addEventListener('pointerdown',onDown);
@@ -1044,6 +1095,7 @@ function loop(){
  foamUpdate(dtr);
  updateTerrainColorsStripe();
  if(frame%12===0){for(const s of structures)s.grp.position.y=terrainHeightAt(s.x,s.z)-.2}
+ if(frame%40===20)updateEnvMap();
  if(frame%30===0){
   let vol=0,asp=0,c=0;
   for(let k=0;k<NN;k+=29){vol+=water[k];asp+=spd[k];c++}
