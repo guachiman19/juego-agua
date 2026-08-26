@@ -89,6 +89,13 @@
  <div class="sec">Ambiente</div>
  <div class="sl"><label>Hora</label><input id="sHour" type="range" min="0" max="239" step="1" value="100"/><b id="vHour">10h</b></div>
  <label class="tg"><input id="tCycle" type="checkbox"/> Ciclo día y noche</label>
+ <div class="sec">Calidad gráfica</div>
+ <div class="presets quals">
+  <button data-q="-1" class="sel">⚙️ Auto</button>
+  <button data-q="2">Alta</button>
+  <button data-q="1">Media</button>
+  <button data-q="0">Baja</button>
+ </div>
  <div class="btnrow">
   <button id="bSave">💾 Guardar</button>
   <button id="bLoad">📂 Cargar</button>
@@ -105,7 +112,7 @@
 </div>
 <button id="pbtn">☰</button>
 <div id="hint">Elige una herramienta y esculpe. El agua encontrará su camino.</div>
-<div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span></div>
+<div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span><br/><span id="stQ">calidad: alta</span></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 'use strict';
@@ -116,7 +123,7 @@ const fL=new Float32Array(NN), fR=new Float32Array(NN), fT=new Float32Array(NN),
 const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN), spd=new Float32Array(NN), wTmp=new Float32Array(NN), wVis=new Float32Array(NN), gateH=new Float32Array(NN);
 const biome=new Uint8Array(NN);
 let sources=[], objects=[], structures=[], structuresPending=[], currentPreset='montana', terrainDirty=false;
-const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false};
+const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
 /* ---- ruido ---- */
@@ -235,6 +242,9 @@ let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bott
 let reflRT=null,refrRT=null,reflCam=null,texMat=null,sun=null,hemi=null,moon=null;
 let sceneRT=null,bloomA=null,bloomB=null,quadScene=null,quadCam=null,quadMesh=null,matBright=null,matBlur=null,matComp=null,terrainShader=null;
 const reflPlaneN=new THREE.Vector3(0,1,0);let reflLevel=0,forceRefl=false;
+const QS=[{scn:.70,refl:0,refr:.34,bloom:.10,every:3,pr:1,foam:.35},
+ {scn:.85,refl:.34,refr:.42,bloom:.16,every:3,pr:1.5,foam:.70},
+ {scn:1,refl:.50,refr:.50,bloom:.25,every:2,pr:2,foam:1}];
 let inst={},walls=[];
 let tPos,tNor,tCol,fPos,fAlp,fSize;
 let wDatS,wDatF,texSurf,texFlow;
@@ -348,7 +358,7 @@ function setupScene(){
  reflCam=new THREE.PerspectiveCamera(50,1,.5,2500);
  texMat=new THREE.Matrix4();
  waterMesh=new THREE.Mesh(wg,new THREE.ShaderMaterial({transparent:true,
-  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uRefl:{value:reflRT.texture},uRefr:{value:refrRT.texture},uTexMat:{value:texMat},uLevel:{value:0},tSurf:{value:texSurf},tFlow:{value:texFlow}},
+  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uRefl:{value:reflRT.texture},uRefr:{value:refrRT.texture},uTexMat:{value:texMat},uLevel:{value:0},uReflOn:{value:1},tSurf:{value:texSurf},tFlow:{value:texFlow}},
   vertexShader:'uniform sampler2D tSurf;uniform sampler2D tFlow;uniform mat4 uTexMat;\n'+
    'varying vec3 vN;varying vec3 vW;varying vec2 vUv;varying vec4 vRefl;varying vec4 vClip;varying float vSurf;\n'+
    'float dec(vec4 c){return (c.r*65280.+c.g*255.)/65535.*102.-6.;}\n'+
@@ -380,7 +390,7 @@ function setupScene(){
    ' vClip=cp;\n'+
    ' gl_Position=cp;\n'+
    '}',
-  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform sampler2D uRefl;uniform sampler2D uRefr;uniform float uLevel;uniform sampler2D tFlow;\n'+
+  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform sampler2D uRefl;uniform sampler2D uRefr;uniform float uLevel;uniform float uReflOn;uniform sampler2D tFlow;\n'+
    'varying vec3 vN;varying vec3 vW;varying vec2 vUv;varying vec4 vRefl;varying vec4 vClip;varying float vSurf;\n'+
    'float h21(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}\n'+
    'float vn2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.-2.*f);\n'+
@@ -418,7 +428,7 @@ function setupScene(){
    'float fr=pow(1.-max(dot(n,V),0.),3.);\n'+
    'vec4 rc=vRefl;rc.xy+=n.xz*.17*rc.w;\n'+
    'vec3 refC=texture2DProj(uRefl,rc).rgb;\n'+
-   'float rok=1.-smoothstep(1.3,7.5,abs(vSurf-uLevel));\n'+
+   'float rok=(1.-smoothstep(1.3,7.5,abs(vSurf-uLevel)))*uReflOn;\n'+
    'refC=mix(fogC*1.05,refC,rok);\n'+
    'refC=mix(refC,fogC*1.02,clamp(spN*.62,0.,.72));\n'+
    'col=mix(col,refC,fr*mix(.88,.42,spN));\n'+
@@ -552,7 +562,8 @@ function renderWaterPasses(){
  if(fishMesh)fishMesh.visible=false;
  _rp.set(0,reflLevel,0);
  _rv.subVectors(_rp,camera.position);
- if(_rv.dot(reflPlaneN)<0&&((frame&1)===0||forceRefl)){
+ const qs=QS[P.quality];
+ if(_rv.dot(reflPlaneN)<0&&qs.refl>0&&((frame%qs.every)===0||forceRefl)){
   forceRefl=false;
   _rv.reflect(reflPlaneN).negate().add(_rp);
   _rm.extractRotation(camera.matrixWorld);
@@ -606,25 +617,42 @@ function setupPost(){
 function resizePost(w,h){
  if(!sceneRT)return;
  w=Math.max(2,Math.floor(w));h=Math.max(2,Math.floor(h));
- sceneRT.setSize(w,h);
- bloomA.setSize(Math.max(2,w>>2),Math.max(2,h>>2));
- bloomB.setSize(Math.max(2,w>>2),Math.max(2,h>>2));
- reflRT.setSize(Math.max(2,w>>1),Math.max(2,h>>1));
- refrRT.setSize(Math.max(2,w>>1),Math.max(2,h>>1));
+ const qs=QS[P.quality];
+ const S=f=>Math.max(2,Math.round(w*f)),T=f=>Math.max(2,Math.round(h*f));
+ sceneRT.setSize(S(qs.scn),T(qs.scn));
+ bloomA.setSize(S(qs.bloom),T(qs.bloom));
+ bloomB.setSize(S(qs.bloom),T(qs.bloom));
+ reflRT.setSize(S(qs.refl||.04),T(qs.refl||.04));
+ refrRT.setSize(S(qs.refr),T(qs.refr));
+}
+function setQuality(q,fromAuto){
+ P.quality=Math.max(0,Math.min(2,q));
+ const qs=QS[P.quality];
+ renderer.setPixelRatio(Math.min(devicePixelRatio,qs.pr));
+ renderer.setSize(innerWidth,innerHeight,false);
+ resizePost(innerWidth,innerHeight);
+ if(waterMesh)waterMesh.material.uniforms.uReflOn.value=qs.refl>0?1:0;
+ const lab=['baja','media','alta'][P.quality];
+ const e=document.getElementById('stQ');
+ if(e)e.textContent='calidad: '+lab+(P.autoQ?' (auto)':'');
+ if(fromAuto){const hh=document.getElementById('hint');if(hh)hh.textContent='Calidad ajustada a '+lab+' para mantener la fluidez.'}
 }
 function renderFrame(){
  renderWaterPasses();
  if(!sceneRT){renderer.render(scene,camera);return}
  renderer.setRenderTarget(sceneRT);
  renderer.render(scene,camera);
- const bw=bloomA.width,bh=bloomA.height;
- quadMesh.material=matBright;matBright.uniforms.tD.value=sceneRT.texture;
- renderer.setRenderTarget(bloomA);renderer.render(quadScene,quadCam);
- quadMesh.material=matBlur;
- matBlur.uniforms.tD.value=bloomA.texture;matBlur.uniforms.uDir.value.set(1/bw,0);
- renderer.setRenderTarget(bloomB);renderer.render(quadScene,quadCam);
- matBlur.uniforms.tD.value=bloomB.texture;matBlur.uniforms.uDir.value.set(0,1/bh);
- renderer.setRenderTarget(bloomA);renderer.render(quadScene,quadCam);
+ if(QS[P.quality].bloom>=.12){
+  const bw=bloomA.width,bh=bloomA.height;
+  quadMesh.material=matBright;matBright.uniforms.tD.value=sceneRT.texture;
+  renderer.setRenderTarget(bloomA);renderer.render(quadScene,quadCam);
+  quadMesh.material=matBlur;
+  matBlur.uniforms.tD.value=bloomA.texture;matBlur.uniforms.uDir.value.set(1/bw,0);
+  renderer.setRenderTarget(bloomB);renderer.render(quadScene,quadCam);
+  matBlur.uniforms.tD.value=bloomB.texture;matBlur.uniforms.uDir.value.set(0,1/bh);
+  renderer.setRenderTarget(bloomA);renderer.render(quadScene,quadCam);
+  matComp.uniforms.uStr.value=.40;
+ } else matComp.uniforms.uStr.value=0;
  quadMesh.material=matComp;matComp.uniforms.tD.value=sceneRT.texture;matComp.uniforms.tB.value=bloomA.texture;
  renderer.setRenderTarget(null);renderer.render(quadScene,quadCam);
 }
@@ -1035,7 +1063,8 @@ function foamUpdate(dt){
    spawnFoam(x2+(Math.random()-.5)*1.5,terrain[k2]+water[k2]+.12,z2+(Math.random()-.5)*1.5,(Math.random()-.5)*.4,.5+Math.random()*.9,(Math.random()-.5)*.4,.4+Math.random()*.4,.5);
   }
  }
- for(let n=0;n<520&&foam.length<MAXFOAM-4;n++){
+ const nMax=Math.round(520*QS[P.quality].foam);
+ for(let n=0;n<nMax&&foam.length<MAXFOAM-4;n++){
   const i=2+((Math.random()*(N-4))|0),j=2+((Math.random()*(N-4))|0),k=idx(i,j);
   const d=water[k],s=spd[k];if(d<0.03)continue;
   const x=(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,z=(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL;
@@ -1285,12 +1314,17 @@ function photoMode(){
  els.forEach(e=>{if(e)e.style.visibility='hidden'});
  const w=innerWidth,h=innerHeight;
  const scale=Math.min(2,4096/Math.max(w,h));
+ const q0=P.quality,a0=P.autoQ;
+ P.autoQ=false;P.quality=2;
+ if(waterMesh)waterMesh.material.uniforms.uReflOn.value=1;
  renderer.setSize(w*scale,h*scale,false);
  resizePost(w*scale,h*scale);
  forceRefl=true;
  renderFrame();
  let url=null;
  try{url=renderer.domElement.toDataURL('image/png')}catch(e){}
+ P.quality=q0;P.autoQ=a0;
+ if(waterMesh)waterMesh.material.uniforms.uReflOn.value=QS[P.quality].refl>0?1:0;
  renderer.setSize(w,h,false);
  resizePost(w,h);
  els.forEach(e=>{if(e)e.style.visibility=''});
@@ -1358,6 +1392,13 @@ function bindUI(){
  $('bReset').addEventListener('click',()=>{undoStack=[];applyPreset(currentPreset)});
  $('bDry').addEventListener('click',()=>{water.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);spd.fill(0)});
  $('bPause').addEventListener('click',()=>{P.paused=!P.paused;$('bPause').textContent=P.paused?'▶':'⏸'});
+ document.querySelectorAll('.quals button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.quals button').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel');
+  const q=+b.dataset.q;
+  if(q<0){P.autoQ=true;setQuality(P.quality)}
+  else{P.autoQ=false;setQuality(q)}
+ }));
  $('bSave').addEventListener('click',saveToFile);
  $('bLoad').addEventListener('click',e=>{
   if(e.shiftKey){
@@ -1390,12 +1431,14 @@ function bindUI(){
  applyDayTime();
 }
 /* ================= BUCLE ================= */
-let lastT=performance.now(),fpsA=60,frame=0,uT=0,autosaveT=0;
+let lastT=performance.now(),fpsA=60,frame=0,uT=0,autosaveT=0,lastQ=0,dtAvg=.016,startT=performance.now();
 function loop(){
  requestAnimationFrame(loop);
  const now=performance.now();
- let dtr=(now-lastT)/1000;lastT=now;dtr=Math.min(dtr,.05);
- fpsA=fpsA*.95+(1/Math.max(dtr,1e-3))*.05;
+ const dtRaw=(now-lastT)/1000;lastT=now;
+ if(dtRaw>0&&dtRaw<3)dtAvg=dtAvg*.8+dtRaw*.2;
+ fpsA=1/Math.max(dtAvg,1e-3);
+ let dtr=Math.min(dtRaw,.05);
  uT+=dtr;
  const steps=P.paused?0:Math.round(2*P.speed);
  for(let q=0;q<steps;q++)simStep();
@@ -1416,6 +1459,10 @@ function loop(){
  foamUpdate(dtr);
  updateTerrainColorsStripe();
  if(frame%12===0){for(const s of structures)s.grp.position.y=terrainHeightAt(s.x,s.z)-.2}
+ if(P.autoQ&&frame>8&&now-startT>2500&&now-lastQ>1500){
+  if(dtAvg>.030&&P.quality>0){lastQ=now;setQuality(P.quality-1,true)}
+  else if(dtAvg<.019&&P.quality<2&&now-lastQ>9000){lastQ=now;setQuality(P.quality+1,true)}
+ }
  if(frame%30===0){
   let vol=0,asp=0,c=0;
   for(let k=0;k<NN;k+=29){vol+=water[k];asp+=spd[k];c++}
@@ -1434,6 +1481,7 @@ function loop(){
 setupScene();
 applyPreset('montana');
 bindUI();
+setQuality(P.quality);
 loop();
 </script>
 </body>
