@@ -6,8 +6,14 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v7 (2026-08-26, commit f4dbec8)
+## Estado actual: v8 (2026-08-26, commit 84097976)
 
+- v8 (ajuste automático de calidad):
+  - `QS[]` define 3 niveles (baja/media/alta) que escalan a la vez: pixel ratio del renderer, tamaño de `sceneRT`, `bloomA/B`, `reflRT`, `refrRT`, cadencia del pase de reflexión (`every` frames), número de partículas de espuma (`foam`) y encendido del reflejo planar (uniform `uReflOn`, nuevo en el shader del agua).
+  - `setQuality(q,fromAuto)` aplica el nivel, redimensiona todos los targets vía `resizePost()` y actualiza el indicador `#stQ` ("calidad: alta (auto)"). Botones ⚙️ Auto / Alta / Media / Baja en el panel (`.quals`).
+  - Heurística auto: EMA del tiempo de frame CRUDO (`dtAvg`, peso .2) tomado ANTES del clamp que usa la física. Baja un nivel si `dtAvg>.030` (~33 fps), sube si `dtAvg<.019` (~52 fps). Compuertas por reloj de pared: `frame>8`, 2.5 s desde el arranque, 1.5 s entre bajadas, 9 s entre subidas.
+  - TRAMPA aprendida: gatear por contador de frames (`frame>150`) o por fps derivado del dt ya clamped NO dispara nunca en render por software (el juego corre a <1 fps y el clamp de .05 impide reportar menos de 20 fps). Medir dt crudo + reloj de pared es lo que funciona.
+  - El modo foto fuerza calidad alta + `uReflOn=1` + `forceRefl=true` y restaura `P.quality`/`P.autoQ` al terminar.
 - v7 (calidad cinematográfica, todo dentro de Three.js r128, SIN migrar de versión):
   - **Reflexión planar real**: se eliminó el cubemap. `renderWaterPasses()` calcula el nivel dominante del agua (centro de masa, `waterLevelNow()`), espeja la cámara sobre ese plano con la matemática de THREE.Reflector (view/lookAt reflejados, `up` reflejado, projectionMatrix copiada) y renderiza a `reflRT` (media resolución). El shader muestrea con `texture2DProj(uRefl, vRefl)` usando `uTexMat` = biasMatrix * proj * viewInverse. Fuera del plano dominante (río en ladera) se mezcla a `fogC` según `abs(vSurf-uLevel)`, así no aparecen reflejos falsos. Reflexión cada 2 frames (`frame&1`), `forceRefl` la fuerza en el modo foto.
   - **Refracción**: la escena sin agua se renderiza a `refrRT` desde la cámara principal y el shader la muestrea en espacio de pantalla (`vClip`) con offset por la normal, atenuado por distancia. Absorción Beer sobre ese color. El alfa del agua subió (`smoothstep(.008,.085,dep)`) porque ahora el fondo lo aporta la refracción, no el blending.
@@ -15,7 +21,7 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
   - **Postprocesado propio** (sin EffectComposer): `setupPost()` crea `sceneRT` + `bloomA/bloomB` a 1/4, quad fullscreen y 3 materiales (bright-pass umbral .86, blur separable 5 taps, composite). `renderFrame()` encadena escena -> bright -> blurH -> blurV -> composite. El tone mapping ACES (Narkowicz) y la saturación 1.16 se aplican SOLO en el composite, no con `renderer.toneMapping`, para que agua, cielo y espuma (ShaderMaterial crudo) reciban el mismo tratamiento que los materiales estándar. `uExp` sube de noche.
   - Coste: 3 renders de escena por frame (refracción media res, reflexión media res cada 2 frames, escena a RT) + 3 pases baratos. En el sandbox por software 25-58 fps; en GPU real sobrado.
 - v6: agua desplazada en GPU (malla RW=512 + texSurf/texFlow). v5: día/noche, peces, biomas. v4: cubemap + modo foto. v3.x: agua advectada, detalle por píxel. v2: malla 256, estructuras, guardar, deshacer.
-- Repo: `guachiman19/juego-agua` (main). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/ sirviendo v7 verificado por hash. Producción: NO desplegada, requiere OK de Jaime. Vercel sin conexión.
+- Repo: `guachiman19/juego-agua` (main). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/ sirviendo v8 verificado por hash. Producción: NO desplegada, requiere OK de Jaime. Vercel sin conexión.
 - **Conectores**: se verificó el registro (Unity, Unreal, Godot, PlayCanvas, Babylon): NO existe conector de motores 3D y no aplica ninguno. La calidad visual se resuelve en shaders. Unity exigiría reescribir en C# y su agua HDRP no exporta a WebGL. Respondido a Jaime en v6 y v7.
 
 ## Método de publicación (importante, ahorra mucho token)
