@@ -1309,7 +1309,29 @@ function commitCanal(){
   }
  }
  updateTerrainMesh();updateTerrainColors();syncGrass();
- hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir. Conéctalo a un río o pon un manantial en su inicio.';
+ /* v10.1: si no hay fuente ni agua cerca del inicio, crear un manantial pequeño y cebar el primer tramo */
+ const st0=rs[0];
+ const si=Math.round((st0.x/WORLD+.5)*(N-1)),sj=Math.round((st0.z/WORLD+.5)*(N-1));
+ let feed=false;
+ for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<14){feed=true;break}}
+ if(!feed){
+  const rr2=Math.max(2,Math.round(5/CELL));
+  outer:
+  for(let j=Math.max(1,sj-rr2);j<=Math.min(N-2,sj+rr2);j++)
+   for(let i=Math.max(1,si-rr2);i<=Math.min(N-2,si+rr2);i++)
+    if(water[j*N+i]>0.25){feed=true;break outer}
+ }
+ if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
+  sources.push({i:si,j:sj,rate:4.5});
+  rebuildMarkers();
+  const prime=Math.min(rs.length,Math.round(18/step));
+  for(let s2=0;s2<prime;s2++){
+   const q2=rs[s2];
+   const ii=Math.round((q2.x/WORLD+.5)*(N-1)),jj=Math.round((q2.z/WORLD+.5)*(N-1));
+   if(ii>0&&ii<N-1&&jj>0&&jj<N-1){const k2=jj*N+ii;water[k2]=Math.max(water[k2],.6)}
+  }
+  hintEl.textContent='Canal excavado y manantial pequeño añadido en su inicio porque no había agua cerca. Quítalo con la herramienta Manantial si sobra.';
+ } else hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir.';
 }
 const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
