@@ -92,6 +92,7 @@
  <label class="tg"><input id="tEro" type="checkbox" checked/> Erosión del terreno</label>
  <label class="tg"><input id="tRain" type="checkbox"/> Lluvia</label>
  <label class="tg"><input id="tSnd" type="checkbox"/> Sonido de agua</label>
+ <label class="tg"><input id="tDuct" type="checkbox"/> Acueducto en cruces del canal</label>
  <div class="sec">Ambiente</div>
  <div class="sl"><label>Hora</label><input id="sHour" type="range" min="0" max="239" step="1" value="100"/><b id="vHour">10h</b></div>
  <label class="tg"><input id="tCycle" type="checkbox"/> Ciclo día y noche</label>
@@ -121,7 +122,8 @@
 <div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span><br/><span id="stQ">calidad: alta</span></div>
 <div id="campad">
  <div class="cpRow"><button data-c="rotL" title="Girar a la izquierda (flecha izq)">⟲</button><button data-c="up" title="Subir cámara (flecha arriba)">▲</button><button data-c="rotR" title="Girar a la derecha (flecha der)">⟳</button></div>
- <div class="cpRow"><button data-c="zin" title="Acercar (+)">＋</button><button data-c="down" title="Bajar cámara (flecha abajo)">▼</button><button data-c="zout" title="Alejar (-)">－</button></div>
+ <div class="cpRow"><button data-c="panL" title="Mover a la izquierda (A)">◀</button><button data-c="down" title="Bajar cámara (flecha abajo)">▼</button><button data-c="panR" title="Mover a la derecha (D)">▶</button></div>
+ <div class="cpRow"><button data-c="zin" title="Acercar (+)" style="width:60px">＋</button><button data-c="zout" title="Alejar (-)" style="width:60px">－</button></div>
  <div class="cpRow"><button data-c="home" title="Vista inicial (tecla H)" style="width:124px">⌂ Vista inicial</button></div>
  <div class="cpLbl">CÁMARA</div>
 </div>
@@ -136,7 +138,7 @@ const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN)
 const biome=new Uint8Array(NN);
 const hard=new Uint8Array(NN); /* celdas de canal: no erosionan ni se derrumban */
 let sources=[], objects=[], structures=[], structuresPending=[], ducts=[], currentPreset='montana', terrainDirty=false;
-const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true};
+const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true, aqueduct:false};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
 /* ---- ruido ---- */
@@ -1259,6 +1261,11 @@ function applyCamHold(dt){
  if(camHold.down)camG.hOff=clamp(camG.hOff-26*dt,-24,150);
  if(camHold.zin)camG.rad=clamp(camG.rad*Math.exp(-1.3*dt),7,340);
  if(camHold.zout)camG.rad=clamp(camG.rad*Math.exp(1.3*dt),7,340);
+ const pv=(camHold.panR?1:0)-(camHold.panL?1:0);
+ if(pv){const sp2=(9+camG.rad*.09)*dt;
+  camG.tx=clamp(camG.tx+Math.cos(cam.th)*sp2*pv,-130,130);
+  camG.tz=clamp(camG.tz-Math.sin(cam.th)*sp2*pv,-130,130);
+ }
 }
 function bindCamPad(){
  document.querySelectorAll('#campad button[data-c]').forEach(b=>{
@@ -1282,6 +1289,8 @@ function camKey(e){
  if(k==='ArrowDown'){camG.hOff=clamp(camG.hOff-4,-24,150);return true}
  if(k==='+'||k==='='){camG.rad=clamp(camG.rad*.90,7,340);return true}
  if(k==='-'||k==='_'){camG.rad=clamp(camG.rad/.90,7,340);return true}
+ if(k==='a'||k==='A'){const sp3=2.5+camG.rad*.02;camG.tx=clamp(camG.tx-Math.cos(cam.th)*sp3,-130,130);camG.tz=clamp(camG.tz+Math.sin(cam.th)*sp3,-130,130);return true}
+ if(k==='d'||k==='D'){const sp3=2.5+camG.rad*.02;camG.tx=clamp(camG.tx+Math.cos(cam.th)*sp3,-130,130);camG.tz=clamp(camG.tz-Math.sin(cam.th)*sp3,-130,130);return true}
  if(k==='h'||k==='H'){camHome();return true}
  return false;
 }
@@ -1359,7 +1368,7 @@ function commitCanal(){
   return w;
  });
  const skip=new Array(rs.length).fill(false),spans=[];
- {
+ if(P.aqueduct){
   const raw=[];
   let s2=2;
   while(s2<rs.length-3){
@@ -1582,6 +1591,11 @@ function applyBrush(dt){
    if(Math.hypot(sx-lastHit.x,sz-lastHit.z)<rw){sources.splice(q,1);ch=true}}
   for(let q=structures.length-1;q>=0;q--){const s=structures[q];
    if(Math.hypot(s.x-lastHit.x,s.z-lastHit.z)<rw+3){scene.remove(s.grp);structures.splice(q,1);chg=true}}
+  let chd=false;
+  for(let q=ducts.length-1;q>=0;q--){const d=ducts[q];
+   const mx=((d.ai+d.bi)/2/(N-1)-.5)*WORLD,mz=((d.aj+d.bj)/2/(N-1)-.5)*WORLD;
+   if(Math.hypot(mx-lastHit.x,mz-lastHit.z)<rw+4){ducts.splice(q,1);chd=true}}
+  if(chd)rebuildDucts();
   if(ch){rebuildObjects();rebuildMarkers()}
   if(chg)rebuildGateField();
   return;
@@ -1655,7 +1669,7 @@ function photoMode(){
  }
 }
 /* ================= UI ================= */
-const HINTS={mirar:'Arrastra para orbitar y usa la rueda para acercarte. También sirven los botones de cámara (abajo a la derecha), las flechas del teclado, + y -.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.',canal:'Dibuja una línea libre sobre el terreno: al soltar se excava un canal que siempre desciende siguiendo tu trazo. El Pincel controla el ancho y la Intensidad la profundidad.'};
+const HINTS={mirar:'Arrastra para orbitar y usa la rueda para acercarte. También sirven los botones de cámara (abajo a la derecha), las flechas del teclado, + y -.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.',canal:'Dibuja una línea libre: al soltar se excava un canal que siempre desciende. Pincel = ancho, Intensidad = profundidad. Si activas \"Acueducto en cruces\", los cruces con ríos se puentean en vez de unirse.'};
 let dayTime=100/240;
 function applyDayTime(){
  const th=(dayTime-.25)*6.28318;
@@ -1704,6 +1718,7 @@ function bindUI(){
   b.classList.add('sel');P.biome=+b.dataset.b;
  }));
  $('tSnd').addEventListener('change',e=>{P.sound=e.target.checked;if(P.sound)audioOn();else audioOff()});
+ $('tDuct').addEventListener('change',e=>P.aqueduct=e.target.checked);
  $('bReset').addEventListener('click',()=>{undoStack=[];applyPreset(currentPreset)});
  $('bDry').addEventListener('click',()=>{water.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);spd.fill(0)});
  $('bPause').addEventListener('click',()=>{P.paused=!P.paused;$('bPause').textContent=P.paused?'▶':'⏸'});
