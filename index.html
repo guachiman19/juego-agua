@@ -135,7 +135,7 @@ const fL=new Float32Array(NN), fR=new Float32Array(NN), fT=new Float32Array(NN),
 const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN), spd=new Float32Array(NN), wTmp=new Float32Array(NN), wVis=new Float32Array(NN), gateH=new Float32Array(NN);
 const biome=new Uint8Array(NN);
 const hard=new Uint8Array(NN); /* celdas de canal: no erosionan ni se derrumban */
-let sources=[], objects=[], structures=[], structuresPending=[], currentPreset='montana', terrainDirty=false;
+let sources=[], objects=[], structures=[], structuresPending=[], ducts=[], currentPreset='montana', terrainDirty=false;
 const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
@@ -215,7 +215,7 @@ function bridgeFromPath(path,frac){
 function applyPreset(name){
  currentPreset=name;water.fill(0);hard.fill(0);sed.fill(0);sedT.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);vX.fill(0);vY.fill(0);wet.fill(0);spd.fill(0);wTmp.fill(0);wVis.fill(0);gateH.fill(0);
  biome.fill(name==='jardin'?2:0);
- sources=[];objects=[];structuresPending=[];
+ sources=[];objects=[];structuresPending=[];ducts.length=0;
  const g=name==='valle'?genValle:(name==='jardin'?genJardin:genMontana);
  for(let j=0;j<N;j++)for(let i=0;i<N;i++)terrain[idx(i,j)]=g(i/(N-1),j/(N-1));
  const pu=(u,v)=>({x:(u-.5)*WORLD,z:(v-.5)*WORLD});
@@ -929,6 +929,49 @@ const MAT_WOOD=new THREE.MeshStandardMaterial({color:0xa33327,roughness:.7});
 const MAT_WOOD2=new THREE.MeshStandardMaterial({color:0x7d2018,roughness:.8});
 const MAT_GATE=new THREE.MeshStandardMaterial({color:0x8a6b43,roughness:.85});
 const MAT_POST=new THREE.MeshStandardMaterial({color:0x5a462c,roughness:.9});
+const MAT_STONE=new THREE.MeshStandardMaterial({color:0xb8b2a4,roughness:.95});
+const MAT_DWATER=new THREE.MeshStandardMaterial({color:0x3ab5de,emissive:0x1a7fa8,emissiveIntensity:.35,roughness:.22,transparent:true,opacity:.82});
+let ductGroup=null;
+function rebuildDucts(){
+ if(ductGroup){scene.remove(ductGroup);ductGroup=null}
+ if(!ducts.length)return;
+ ductGroup=new THREE.Group();
+ for(const d of ducts){
+  const ax=(d.ai/(N-1)-.5)*WORLD,az=(d.aj/(N-1)-.5)*WORLD;
+  const bx=(d.bi/(N-1)-.5)*WORLD,bz=(d.bj/(N-1)-.5)*WORLD;
+  const mx=(ax+bx)/2,mz=(az+bz)/2,ym=d.yv!==undefined?d.yv:(d.ya+d.yb)/2;
+  const len=Math.hypot(bx-ax,bz-az)+2.6;
+  const W=Math.max(2.6,d.w||3.6);
+  const deck=new THREE.Group();
+  deck.position.set(mx,ym,mz);
+  deck.rotation.order='YXZ';
+  deck.rotation.y=Math.atan2(bx-ax,bz-az);
+  if(d.yv===undefined)deck.rotation.x=-Math.atan2(d.yb-d.ya,len);
+  const floor=new THREE.Mesh(new THREE.BoxGeometry(W,.7,len),MAT_STONE);
+  floor.position.y=-.35;floor.castShadow=true;deck.add(floor);
+  for(const sg of [-1,1]){
+   const wall=new THREE.Mesh(new THREE.BoxGeometry(.55,1.5,len),MAT_STONE);
+   wall.position.set(sg*(W/2-.27),.45,0);wall.castShadow=true;deck.add(wall);
+  }
+  const wat=new THREE.Mesh(new THREE.BoxGeometry(Math.max(1.2,W-1.4),.3,len-.9),MAT_DWATER);
+  wat.position.y=.34;deck.add(wat);
+  ductGroup.add(deck);
+  const np=Math.max(1,Math.round(len/6.5));
+  for(let q=1;q<=np;q++){
+   const t=q/(np+1);
+   const px=ax+(bx-ax)*t,pz=az+(bz-az)*t;
+   const top=(d.yv!==undefined?d.yv:d.ya+(d.yb-d.ya)*t)-.6;
+   const gy=terrainHeightAt(px,pz);
+   const hgt=Math.max(1.2,top-gy+1.4);
+   const pier=new THREE.Mesh(new THREE.BoxGeometry(1.5,hgt,2.3),MAT_STONE);
+   pier.position.set(px,top-hgt/2,pz);
+   pier.rotation.y=Math.atan2(bx-ax,bz-az);
+   pier.castShadow=true;
+   ductGroup.add(pier);
+  }
+ }
+ scene.add(ductGroup);
+}
 function buildBridgeGroup(){
  const g=new THREE.Group();
  const deck=new THREE.Mesh(new THREE.BoxGeometry(10,.5,3.4),MAT_WOOD);
@@ -1008,7 +1051,7 @@ function onWorldRebuilt(){
  clearStructures();
  for(const p of structuresPending)addStructure(p.kind,p.x,p.z,p.ry,p.open);
  structuresPending=[];
- updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();scatterGrass();spawnFish();foam.length=0;
+ updateTerrainMesh();updateTerrainColors();updateWaterMesh();rebuildObjects();rebuildMarkers();rebuildDucts();scatterGrass();spawnFish();foam.length=0;
 }
 /* ================= SIMULACIÓN ================= */
 const DT=0.14,DAMP=0.985,GK=9.81*0.55;
@@ -1020,6 +1063,14 @@ function simStep(){
   water[k-1]+=rr*.2;water[k+1]+=rr*.2;water[k-N]+=rr*.2;water[k+N]+=rr*.2;
  }
  if(P.rain){for(let k=0;k<NN;k++)water[k]+=0.016*dt}
+ for(const d of ducts){
+  const ka=idx(d.ai,d.aj),kb=idx(d.bi,d.bj);
+  const sa=terrain[ka]+water[ka],sb=terrain[kb]+water[kb];
+  if(water[ka]>0.02&&sa>sb){
+   const q=Math.min(water[ka]*.5,(sa-sb)*.35);
+   water[ka]-=q;water[kb]+=q;
+  }
+ }
  for(let j=0;j<N;j++)for(let i=0;i<N;i++){const k=idx(i,j);
   const hk=terrain[k]+gateH[k]+water[k];
   const l=i>0?hk-(terrain[k-1]+gateH[k-1]+water[k-1]):water[k]+3;
@@ -1153,7 +1204,7 @@ function u8b64(a){let s='';const CH=32768;for(let o=0;o<a.length;o+=CH)s+=String
 function b64u8(s){const b=atob(s),u=new Uint8Array(b.length);for(let q=0;q<b.length;q++)u[q]=b.charCodeAt(q);return u}
 function serializeGame(){
  return JSON.stringify({v:2,N:N,preset:currentPreset,terrain:f32b64(terrain),water:f32b64(water),biome:u8b64(biome),hard:u8b64(hard),
-  sources:sources,objects:objects,
+  sources:sources,objects:objects,ducts:ducts,
   structures:structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open}))});
 }
 function restoreGame(data){
@@ -1163,7 +1214,7 @@ function restoreGame(data){
  currentPreset=data.preset||'montana';
  if(data.biome)biome.set(b64u8(data.biome));else biome.fill(0);
  if(data.hard)hard.set(b64u8(data.hard));else hard.fill(0);
- sources=data.sources||[];objects=data.objects||[];
+ sources=data.sources||[];objects=data.objects||[];ducts=data.ducts||[];
  structuresPending=(data.structures||[]).slice();
  fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);sedT.fill(0);vX.fill(0);vY.fill(0);spd.fill(0);wet.fill(0);wVis.fill(0);wTmp.fill(0);
  onWorldRebuilt();
@@ -1183,7 +1234,7 @@ function saveToFile(){
 const UNDO_MAX=12;let undoStack=[];
 function pushUndo(){
  if(undoStack.length>=UNDO_MAX)undoStack.shift();
- undoStack.push({t:new Float32Array(terrain),b:new Uint8Array(biome),h:new Uint8Array(hard),s:JSON.stringify(sources),o:JSON.stringify(objects),
+ undoStack.push({t:new Float32Array(terrain),b:new Uint8Array(biome),h:new Uint8Array(hard),s:JSON.stringify(sources),o:JSON.stringify(objects),du:JSON.stringify(ducts),
   st:JSON.stringify(structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open})))});
 }
 function doUndo(){
@@ -1192,7 +1243,7 @@ function doUndo(){
  terrain.set(u.t);
  if(u.b)biome.set(u.b);
  if(u.h)hard.set(u.h);else hard.fill(0);
- sources=JSON.parse(u.s);objects=JSON.parse(u.o);
+ sources=JSON.parse(u.s);objects=JSON.parse(u.o);ducts=u.du?JSON.parse(u.du):[];
  structuresPending=JSON.parse(u.st);
  onWorldRebuilt();
 }
@@ -1298,12 +1349,56 @@ function commitCanal(){
  const bw=Math.max(1.7,hw*.42);          /* muro de contencion */
  const R=hw+bw+2.4,slope=.055;
  const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
+ /* acueductos: tramos del trazo que cruzan agua existente no se excavan, se puentean */
+ const wet3=rs.map(q=>{
+  const ci=Math.round((q.x/WORLD+.5)*(N-1)),cj=Math.round((q.z/WORLD+.5)*(N-1));
+  let w=0;
+  for(let j=Math.max(0,cj-1);j<=Math.min(N-1,cj+1);j++)
+   for(let i=Math.max(0,ci-1);i<=Math.min(N-1,ci+1);i++)
+    w=Math.max(w,water[j*N+i]);
+  return w;
+ });
+ const skip=new Array(rs.length).fill(false),spans=[];
+ {
+  let s2=3;
+  while(s2<rs.length-3){
+   if(wet3[s2]>0.15){
+    let e2=s2;
+    while(e2<rs.length-3&&wet3[e2]>0.15)e2++;
+    const a2=s2-1,b2=Math.min(rs.length-4,e2);
+    if(b2-a2>=2&&b2-a2<=70){
+     for(let m=a2+1;m<b2;m++)skip[m]=true;
+     spans.push([a2,b2]);
+    }
+    s2=e2+1;
+   } else s2++;
+  }
+ }
+ let prot=null; /* celdas de rio bajo un acueducto: intocables */
+ if(spans.length){
+  prot=new Uint8Array(NN);
+  const rc2=(hw+bw+2.4)/CELL;
+  for(let s3=0;s3<rs.length;s3++){
+   if(!skip[s3])continue;
+   const q3=rs[s3];
+   const ci3=(q3.x/WORLD+.5)*(N-1),cj3=(q3.z/WORLD+.5)*(N-1);
+   for(let j=Math.max(0,Math.floor(cj3-rc2));j<=Math.min(N-1,Math.ceil(cj3+rc2));j++)
+    for(let i=Math.max(0,Math.floor(ci3-rc2));i<=Math.min(N-1,Math.ceil(ci3+rc2));i++)
+     prot[j*N+i]=1;
+  }
+ }
  const h0=tH0[0]-depth;
  let h=h0;
+ const hArr=new Array(rs.length);
  for(let s=0;s<rs.length;s++){
-  const q=rs[s];
   if(s)h-=slope*step;
-  h=Math.min(h,tH0[s]-depth*.72);
+  if(!skip[s])h=Math.min(h,tH0[s]-depth*.72); /* sobre el rio el lecho mantiene su altura de acueducto */
+  hArr[s]=h;
+ }
+ for(let s=0;s<rs.length;s++){
+  if(skip[s])continue;
+  const q=rs[s];
+  h=hArr[s];
   const bankTop=h+depth*.92;
   const ci=(q.x/WORLD+.5)*(N-1),cj=(q.z/WORLD+.5)*(N-1);
   const rc=R/CELL;
@@ -1314,6 +1409,7 @@ function commitCanal(){
    if(d>R)continue;
    const k=j*N+i;
    const wk=water[k]>0.12; /* celda con agua existente: nunca levantar (no tapar rios ni la entrada) */
+   if(wk&&prot&&prot[k])continue; /* rio bajo acueducto: no se toca */
    if(d<hw){
     const tb=h+Math.pow(d/hw,1.9)*depth*.30;
     terrain[k]=wk?Math.min(terrain[k],tb):tb;
@@ -1329,6 +1425,23 @@ function commitCanal(){
    }
   }
  }
+ /* registrar acueductos y su estructura visible */
+ for(const sp of spans){
+  const qa=rs[sp[0]],qb=rs[sp[1]];
+  let rsMax=-1e9;
+  for(let m=sp[0];m<=sp[1];m++){
+   const qm=rs[m];
+   const im=Math.round((qm.x/WORLD+.5)*(N-1)),jm=Math.round((qm.z/WORLD+.5)*(N-1));
+   const km=jm*N+im;
+   rsMax=Math.max(rsMax,terrain[km]+water[km]);
+  }
+  ducts.push({ai:Math.round((qa.x/WORLD+.5)*(N-1)),aj:Math.round((qa.z/WORLD+.5)*(N-1)),
+   bi:Math.round((qb.x/WORLD+.5)*(N-1)),bj:Math.round((qb.z/WORLD+.5)*(N-1)),
+   ya:hArr[sp[0]]+.2,yb:hArr[sp[1]]+.2,
+   yv:Math.max((hArr[sp[0]]+hArr[sp[1]])/2+.2,rsMax+1.05),
+   w:Math.min(hw*.95,4.6)});
+ }
+ if(spans.length)rebuildDucts();
  /* rampas abiertas de entrada y salida: solo excavan, conectan el canal con lo que haya */
  const rampa=(from,dir,hBase,drop)=>{
   const L2=Math.ceil((bw+3.2)/step);
@@ -1360,13 +1473,6 @@ function commitCanal(){
  const si=Math.round((st0.x/WORLD+.5)*(N-1)),sj=Math.round((st0.z/WORLD+.5)*(N-1));
  let feed=false;
  for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<14){feed=true;break}}
- if(!feed){
-  const rr2=Math.max(1,Math.round(1.2/CELL));
-  outer:
-  for(let j=Math.max(1,sj-rr2);j<=Math.min(N-2,sj+rr2);j++)
-   for(let i=Math.max(1,si-rr2);i<=Math.min(N-2,si+rr2);i++)
-    if(water[j*N+i]>0.25){feed=true;break outer}
- }
  if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
   sources.push({i:si,j:sj,rate:14});
   rebuildMarkers();
@@ -1378,6 +1484,7 @@ function commitCanal(){
   }
   hintEl.textContent='Canal excavado y manantial pequeño añadido en su inicio porque no había agua cerca. Quítalo con la herramienta Manantial si sobra.';
  } else hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir.';
+ if(spans.length)hintEl.textContent='Canal con acueducto: cruza el agua por un puente de piedra sin capturar el río.';
 }
 const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
