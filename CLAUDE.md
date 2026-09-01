@@ -6,8 +6,13 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v8 (2026-08-26, commit 84097976)
+## Estado actual: v9 (2026-09-01, commit 45d6081)
 
+- v9 (sombras del agua sobre el terreno):
+  - `waterMesh.castShadow=true` con un `customDepthMaterial` (MeshDepthMaterial RGBADepthPacking) cuyo vertex shader repite EXACTAMENTE el desplazamiento del agua (surfAt bilineal de tSurf + dep de tFlow, y=s+.04/-.06), de modo que la sombra proyectada coincide con la superficie visible.
+  - Sombra parcial sin tocar las demas luces: en el fragment del depth material se descartan texeles con un dither ordenado 4x4 (`bay(gl_FragCoord.xy)`) segun opacidad por profundidad `shO=clamp(.25+dep*.22,0,.85)`; PCFSoft promedia el patron y queda sombra gris, mas densa cuanto mas honda el agua. dep<0.05 no proyecta (orillas limpias).
+  - Optimización: `renderer.shadowMap.autoUpdate=false` y `needsUpdate=true` solo antes del render principal en renderFrame -> 1 render de sombras por frame (antes eran 2-3, uno por cada pase); los pases de reflexión/refracción reutilizan el mapa del frame anterior (incluye el agua, correcto para el lecho refractado).
+  - Gating: `QS[].shad` (baja=0: el agua no proyecta; media/alta=1). setQuality y el modo foto lo aplican (foto fuerza sombra activa y restaura).
 - v8 (ajuste automático de calidad):
   - `QS[]` define 3 niveles (baja/media/alta) que escalan a la vez: pixel ratio del renderer, tamaño de `sceneRT`, `bloomA/B`, `reflRT`, `refrRT`, cadencia del pase de reflexión (`every` frames), número de partículas de espuma (`foam`) y encendido del reflejo planar (uniform `uReflOn`, nuevo en el shader del agua).
   - `setQuality(q,fromAuto)` aplica el nivel, redimensiona todos los targets vía `resizePost()` y actualiza el indicador `#stQ` ("calidad: alta (auto)"). Botones ⚙️ Auto / Alta / Media / Baja en el panel (`.quals`).
@@ -21,7 +26,7 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
   - **Postprocesado propio** (sin EffectComposer): `setupPost()` crea `sceneRT` + `bloomA/bloomB` a 1/4, quad fullscreen y 3 materiales (bright-pass umbral .86, blur separable 5 taps, composite). `renderFrame()` encadena escena -> bright -> blurH -> blurV -> composite. El tone mapping ACES (Narkowicz) y la saturación 1.16 se aplican SOLO en el composite, no con `renderer.toneMapping`, para que agua, cielo y espuma (ShaderMaterial crudo) reciban el mismo tratamiento que los materiales estándar. `uExp` sube de noche.
   - Coste: 3 renders de escena por frame (refracción media res, reflexión media res cada 2 frames, escena a RT) + 3 pases baratos. En el sandbox por software 25-58 fps; en GPU real sobrado.
 - v6: agua desplazada en GPU (malla RW=512 + texSurf/texFlow). v5: día/noche, peces, biomas. v4: cubemap + modo foto. v3.x: agua advectada, detalle por píxel. v2: malla 256, estructuras, guardar, deshacer.
-- Repo: `guachiman19/juego-agua` (main). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/ sirviendo v8 verificado por hash. Producción: NO desplegada, requiere OK de Jaime. Vercel sin conexión.
+- Repo: `guachiman19/juego-agua` (main). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/ sirviendo v9 verificado por hash. Producción: NO desplegada, requiere OK de Jaime. Vercel sin conexión.
 - **Conectores**: se verificó el registro (Unity, Unreal, Godot, PlayCanvas, Babylon): NO existe conector de motores 3D y no aplica ninguno. La calidad visual se resuelve en shaders. Unity exigiría reescribir en C# y su agua HDRP no exporta a WebGL. Respondido a Jaime en v6 y v7.
 
 ## Método de publicación (importante, ahorra mucho token)
