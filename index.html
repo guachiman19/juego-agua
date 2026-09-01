@@ -1353,8 +1353,13 @@ function commitCanal(){
   }
  }
  rs.push({x:pts[pts.length-1].x,z:pts[pts.length-1].z});
- const depth=1.8+P.strength*3.4;
- const hw=clamp(P.brush*.30,1.8,7);
+ /* v11.3: si el canal nace en (o desemboca en) un cauce existente, hereda su ancho y profundidad */
+ let depth=1.8+P.strength*3.4;
+ let hw=clamp(P.brush*.30,1.8,7);
+ const mA=measureChannelAt(rs[0].x,rs[0].z);
+ const mB=mA?null:measureChannelAt(rs[rs.length-1].x,rs[rs.length-1].z);
+ const linked=mA||mB;
+ if(linked){depth=linked.depth;hw=linked.hw}
  const bw=Math.max(1.7,hw*.42);          /* muro de contencion */
  const R=hw+bw+2.4,slope=.055;
  const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
@@ -1502,6 +1507,42 @@ function commitCanal(){
   hintEl.textContent='Canal excavado y manantial pequeño añadido en su inicio porque no había agua cerca. Quítalo con la herramienta Manantial si sobra.';
  } else hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir.';
  if(spans.length)hintEl.textContent='Canal con acueducto: cruza el agua por un puente de piedra sin capturar el río.';
+ if(linked)hintEl.textContent+=' Tamaño heredado del cauce conectado: ancho '+(hw*2).toFixed(1)+', profundidad '+depth.toFixed(1)+'.';
+ lastCanalInfo={hw:hw,depth:depth,linked:!!linked,width:linked?linked.width:0};
+}
+let lastCanalInfo=null;
+/* mide el cauce de agua mas cercano a un punto: ancho por transecta perpendicular al flujo y altura de orilla */
+function measureChannelAt(x,z){
+ const ci=Math.round((x/WORLD+.5)*(N-1)),cj=Math.round((z/WORLD+.5)*(N-1));
+ let best=null,bd=1e9;const rr=Math.round(3/CELL);
+ for(let j=cj-rr;j<=cj+rr;j++)for(let i=ci-rr;i<=ci+rr;i++){
+  if(i<1||i>N-2||j<1||j>N-2)continue;
+  const k=j*N+i;
+  if(water[k]>0.05){const d=Math.hypot(i-ci,j-cj);if(d<bd){bd=d;best={i:i,j:j,k:k}}}
+ }
+ if(!best)return null;
+ const k=best.k;
+ const fx=vX[k],fz=vY[k],fl=Math.hypot(fx,fz);
+ let px=1,pz=0;
+ if(fl>0.05){px=-fz/fl;pz=fx/fl}
+ const walk=(sx,sz)=>{
+  let n=0,wmax=0,tEdge=null;
+  for(let e=1;e<=Math.round(16/CELL);e++){
+   const i=Math.round(best.i+sx*e),j=Math.round(best.j+sz*e);
+   if(i<1||i>N-2||j<1||j>N-2)break;
+   const kk=j*N+i;
+   if(water[kk]>0.05){n=e;wmax=Math.max(wmax,water[kk])}
+   else{tEdge=terrain[kk];break}
+  }
+  return {n:n,wmax:wmax,tEdge:tEdge};
+ };
+ const a=walk(px,pz),b=walk(-px,-pz);
+ let width=(a.n+b.n+1)*CELL;
+ let wmax=Math.max(a.wmax,b.wmax,water[k]);
+ if(fl<=0.05){const a2=walk(pz,-px),b2=walk(-pz,px);width=(width+(a2.n+b2.n+1)*CELL)/2}
+ const eA=a.tEdge===null?terrain[k]:a.tEdge,eB=b.tEdge===null?terrain[k]:b.tEdge;
+ const bank=Math.max(0,Math.max(eA,eB)-terrain[k]);
+ return {hw:clamp(width/2,1.8,7),depth:clamp(bank+wmax*.6+.6,1.8,5.2),width:width,wmax:wmax,bank:bank};
 }
 const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
