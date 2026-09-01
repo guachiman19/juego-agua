@@ -6,8 +6,14 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v10.3 (2026-09-01, commit 0240ab7)
+## Estado actual: v10.4 (2026-09-01, commit 5ed814d)
 
+- v10.4 (el agua por fin RECORRE los canales, tercer feedback de Jaime): tres causas raiz encontradas con perfiles numericos:
+  1) AZOLVE: la toma desde un rio se tapaba sola (el sedimento se deposita donde el flujo se frena; el terreno subio +1.4u en la toma en 1200 pasos). Fix: mascara `hard` (Uint8Array NN) marcada por el canal; en erode() las celdas hard ni erosionan NI reciben deposito (sed[k]*=.85 pasa de largo), y relaxSlopes() no derrumba pares con hard. hard va en save (opcional, tolerante), en undo y se limpia en applyPreset.
+  2) MUROS QUE SELLABAN: el anillo de muro tapaba la entrada, la salida y los cruces con rios. Fix: celdas con water>0.12 nunca se levantan (bed solo corta, muro/talud solo bajan), y rampas de entrada/salida que SOLO excavan (radio hw, largo bw+3.2, entrada sube .30/u hacia atras, salida baja .30/u) conectan el canal con lo que haya. En cruces el canal CAPTURA el rio (fisica correcta).
+  3) MANANTIAL AUSENTE: "agua a <5u" impedia el manantial aunque esa agua no alimentara. Ahora solo se omite si el trazo EMPIEZA dentro del agua (radio 1.2u) o hay fuente a <14u; rate 14.
+  Ademas: evaporacion casi nula en celdas hard (0.99985 vs 0.9993) para que las acequias largas no se adelgacen.
+  Verificado: toma desde rio 22/22 puntos mojados a 2500 pasos (umbral visual 0.012); espiral 2.5 vueltas 50/66 y 0 fugas a 4000 pasos; el perfil de la toma quedo estable (sin azolve). OJO en pruebas: usar umbral 0.012 (= lo que el render muestra), 0.05 lee "seco" corrientes finas visibles.
 - v10.3 (fix clave del canal, feedback con screenshot de espiral): en ladera empinada el canal excavado con solo min() quedaba abierto por el lado de bajada y el agua se derramaba monte abajo sin usar el trazo. Ahora la seccion es de ACEQUIA con asignacion EXACTA de terreno: lecho parabolico (=h+pow(d/hw,1.9)*depth*.30, excava Y RELLENA para dar piso solido), anillo de muro a bankTop=h+depth*.92 (levanta el lado de bajada, rebanca el de subida) y transicion lerp al terreno natural (bw=max(1.7,hw*.42), R=hw+bw+2.4). Verificado con espiral de 2.5 vueltas alrededor del cono: 60/66 puntos mojados y 0 fugas a 7u ladera abajo tras 900 simStep.
 - v10.2 (ajustes por feedback de Jaime): canales mas profundos (depth=1.8+strength*3.4, corte minimo .72*depth, lecho pow 1.9 con amplitud .38: mas seccion util), manantial automatico rate 10 (igual a uno manual por defecto) y cebado a 1.0; los botones/flechas arriba-abajo ya NO inclinan (pitch) sino que mueven la camara en Y puro via camG.hOff (clamp -24..150) sumado en camApply a la altura objetivo; H/Vista inicial resetea hOff. El pitch queda solo en el arrastre del raton.
 - v10 (controles manuales + herramienta Canal):
