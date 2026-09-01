@@ -134,6 +134,7 @@ const terrain=new Float32Array(NN), water=new Float32Array(NN), sed=new Float32A
 const fL=new Float32Array(NN), fR=new Float32Array(NN), fT=new Float32Array(NN), fB=new Float32Array(NN);
 const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN), spd=new Float32Array(NN), wTmp=new Float32Array(NN), wVis=new Float32Array(NN), gateH=new Float32Array(NN);
 const biome=new Uint8Array(NN);
+const hard=new Uint8Array(NN); /* celdas de canal: no erosionan ni se derrumban */
 let sources=[], objects=[], structures=[], structuresPending=[], currentPreset='montana', terrainDirty=false;
 const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true};
 const idx=(i,j)=>j*N+i;
@@ -212,7 +213,7 @@ function bridgeFromPath(path,frac){
  structuresPending.push({kind:'puente',x:(p[0]/(N-1)-.5)*WORLD,z:(p[1]/(N-1)-.5)*WORLD,ry:Math.atan2(-(b[0]-a[0]),-(b[1]-a[1]))});
 }
 function applyPreset(name){
- currentPreset=name;water.fill(0);sed.fill(0);sedT.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);vX.fill(0);vY.fill(0);wet.fill(0);spd.fill(0);wTmp.fill(0);wVis.fill(0);gateH.fill(0);
+ currentPreset=name;water.fill(0);hard.fill(0);sed.fill(0);sedT.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);vX.fill(0);vY.fill(0);wet.fill(0);spd.fill(0);wTmp.fill(0);wVis.fill(0);gateH.fill(0);
  biome.fill(name==='jardin'?2:0);
  sources=[];objects=[];structuresPending=[];
  const g=name==='valle'?genValle:(name==='jardin'?genJardin:genMontana);
@@ -1034,7 +1035,7 @@ function simStep(){
   const inF=(i>0?fR[k-1]:0)+(i<N-1?fL[k+1]:0)+(j>0?fB[k-N]:0)+(j<N-1?fT[k+N]:0);
   const outF=fL[k]+fR[k]+fT[k]+fB[k];
   let w=water[k]+dt*(inF-outF)/CA;
-  w*=biome[k]===1?0.9975:0.9993;
+  w*=hard[k]?0.99985:(biome[k]===1?0.9975:0.9993); /* acequias: casi sin evaporacion */
   water[k]=w<1e-4?0:Math.min(w,30);
   const dm=Math.max(water[k],0.05);
   const dwx=((i>0?fR[k-1]:0)-fL[k]+fR[k]-(i<N-1?fL[k+1]:0))*.5;
@@ -1055,12 +1056,17 @@ function simStep(){
 }
 function relaxSlopes(){
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
+  const hR2=hard[k]||hard[k+1],hB2=hard[k]||hard[k+N];
   const dR=terrain[k]-terrain[k+1];
-  if(dR>3.2){const m=(dR-3.2)*.08;terrain[k]-=m;terrain[k+1]+=m;terrainDirty=true}
-  else if(dR<-3.2){const m=(-dR-3.2)*.08;terrain[k]+=m;terrain[k+1]-=m;terrainDirty=true}
+  if(!hR2){
+   if(dR>3.2){const m=(dR-3.2)*.08;terrain[k]-=m;terrain[k+1]+=m;terrainDirty=true}
+   else if(dR<-3.2){const m=(-dR-3.2)*.08;terrain[k]+=m;terrain[k+1]-=m;terrainDirty=true}
+  }
   const dB=terrain[k]-terrain[k+N];
-  if(dB>3.2){const m=(dB-3.2)*.08;terrain[k]-=m;terrain[k+N]+=m;terrainDirty=true}
-  else if(dB<-3.2){const m=(-dB-3.2)*.08;terrain[k]+=m;terrain[k+N]-=m;terrainDirty=true}
+  if(!hB2){
+   if(dB>3.2){const m=(dB-3.2)*.08;terrain[k]-=m;terrain[k+N]+=m;terrainDirty=true}
+   else if(dB<-3.2){const m=(-dB-3.2)*.08;terrain[k]+=m;terrain[k+N]-=m;terrainDirty=true}
+  }
  }
 }
 function nearSource(i,j){for(const s of sources){if(Math.abs(s.i-i)<6&&Math.abs(s.j-j)<6)return true}return false}
@@ -1069,12 +1075,13 @@ function erode(dt){
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
   if(gateH[k]>0)continue;
   const d=water[k];
-  if(d<0.002){if(sed[k]>1e-5){terrain[k]+=sed[k]*.4;sed[k]*=.6;terrainDirty=true}continue}
+  if(d<0.002){if(sed[k]>1e-5){if(!hard[k]){terrain[k]+=sed[k]*.4;terrainDirty=true}sed[k]*=.6}continue}
   const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
   const tilt=Math.max(.1,sl/Math.sqrt(1+sl*sl));
   const cap=Kc*spd[k]*tilt*Math.min(d,1.5);
-  if(cap>sed[k]){if(!nearSource(i,j)&&terrain[k]>((terrain[k-1]+terrain[k+1]+terrain[k-N]+terrain[k+N])*.25-2.5)){const e=Math.min((cap-sed[k])*.045,.018);terrain[k]-=e;sed[k]+=e;terrainDirty=true}}
-  else{const dp=Math.min((sed[k]-cap)*.12,sed[k]);terrain[k]+=dp;sed[k]-=dp;if(dp>1e-5)terrainDirty=true}
+  if(cap>sed[k]){if(!hard[k]&&!nearSource(i,j)&&terrain[k]>((terrain[k-1]+terrain[k+1]+terrain[k-N]+terrain[k+N])*.25-2.5)){const e=Math.min((cap-sed[k])*.045,.018);terrain[k]-=e;sed[k]+=e;terrainDirty=true}}
+  else if(!hard[k]){const dp=Math.min((sed[k]-cap)*.12,sed[k]);terrain[k]+=dp;sed[k]-=dp;if(dp>1e-5)terrainDirty=true}
+  else sed[k]*=.85;
  }
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
   if(sed[k]<1e-6&&water[k]<0.002){sedT[k]=sed[k];continue}
@@ -1145,7 +1152,7 @@ function b64f32(s){const b=atob(s),u=new Uint8Array(b.length);for(let q=0;q<b.le
 function u8b64(a){let s='';const CH=32768;for(let o=0;o<a.length;o+=CH)s+=String.fromCharCode.apply(null,a.subarray(o,o+CH));return btoa(s)}
 function b64u8(s){const b=atob(s),u=new Uint8Array(b.length);for(let q=0;q<b.length;q++)u[q]=b.charCodeAt(q);return u}
 function serializeGame(){
- return JSON.stringify({v:2,N:N,preset:currentPreset,terrain:f32b64(terrain),water:f32b64(water),biome:u8b64(biome),
+ return JSON.stringify({v:2,N:N,preset:currentPreset,terrain:f32b64(terrain),water:f32b64(water),biome:u8b64(biome),hard:u8b64(hard),
   sources:sources,objects:objects,
   structures:structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open}))});
 }
@@ -1155,6 +1162,7 @@ function restoreGame(data){
  const wv=b64f32(data.water);
  currentPreset=data.preset||'montana';
  if(data.biome)biome.set(b64u8(data.biome));else biome.fill(0);
+ if(data.hard)hard.set(b64u8(data.hard));else hard.fill(0);
  sources=data.sources||[];objects=data.objects||[];
  structuresPending=(data.structures||[]).slice();
  fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);sedT.fill(0);vX.fill(0);vY.fill(0);spd.fill(0);wet.fill(0);wVis.fill(0);wTmp.fill(0);
@@ -1175,7 +1183,7 @@ function saveToFile(){
 const UNDO_MAX=12;let undoStack=[];
 function pushUndo(){
  if(undoStack.length>=UNDO_MAX)undoStack.shift();
- undoStack.push({t:new Float32Array(terrain),b:new Uint8Array(biome),s:JSON.stringify(sources),o:JSON.stringify(objects),
+ undoStack.push({t:new Float32Array(terrain),b:new Uint8Array(biome),h:new Uint8Array(hard),s:JSON.stringify(sources),o:JSON.stringify(objects),
   st:JSON.stringify(structures.map(s=>({kind:s.kind,x:s.x,z:s.z,ry:s.ry,open:s.open})))});
 }
 function doUndo(){
@@ -1183,6 +1191,7 @@ function doUndo(){
  if(!u)return;
  terrain.set(u.t);
  if(u.b)biome.set(u.b);
+ if(u.h)hard.set(u.h);else hard.fill(0);
  sources=JSON.parse(u.s);objects=JSON.parse(u.o);
  structuresPending=JSON.parse(u.st);
  onWorldRebuilt();
@@ -1289,7 +1298,8 @@ function commitCanal(){
  const bw=Math.max(1.7,hw*.42);          /* muro de contencion */
  const R=hw+bw+2.4,slope=.055;
  const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
- let h=tH0[0]-depth;
+ const h0=tH0[0]-depth;
+ let h=h0;
  for(let s=0;s<rs.length;s++){
   const q=rs[s];
   if(s)h-=slope*step;
@@ -1303,18 +1313,46 @@ function commitCanal(){
    const dx=(i-ci)*CELL,dz=(j-cj)*CELL,d=Math.hypot(dx,dz);
    if(d>R)continue;
    const k=j*N+i;
+   const wk=water[k]>0.12; /* celda con agua existente: nunca levantar (no tapar rios ni la entrada) */
    if(d<hw){
-    /* lecho: se excava Y se rellena, para que en ladera quede una acequia con piso solido */
-    terrain[k]=h+Math.pow(d/hw,1.9)*depth*.30;
+    const tb=h+Math.pow(d/hw,1.9)*depth*.30;
+    terrain[k]=wk?Math.min(terrain[k],tb):tb;
+    hard[k]=1;
    }else if(d<hw+bw){
-    /* muro: en el lado de bajada se LEVANTA hasta bankTop; en el de subida se rebaja a banco */
-    terrain[k]=bankTop;
+    if(!wk){terrain[k]=bankTop;hard[k]=1}
+    else if(terrain[k]>bankTop){terrain[k]=bankTop;hard[k]=1}
    }else{
-    /* transicion suave muro a terreno natural */
     const f=(d-hw-bw)/(R-hw-bw);
-    terrain[k]=bankTop*(1-f)+terrain[k]*f;
+    const tt=bankTop*(1-f)+terrain[k]*f;
+    if(!wk)terrain[k]=tt;
+    else if(tt<terrain[k])terrain[k]=tt;
    }
   }
+ }
+ /* rampas abiertas de entrada y salida: solo excavan, conectan el canal con lo que haya */
+ const rampa=(from,dir,hBase,drop)=>{
+  const L2=Math.ceil((bw+3.2)/step);
+  for(let e=1;e<=L2;e++){
+   const px=from.x+dir.x*step*e,pz=from.z+dir.z*step*e;
+   const hR=hBase+drop*step*e;
+   const ci=(px/WORLD+.5)*(N-1),cj=(pz/WORLD+.5)*(N-1);
+   const rc=hw/CELL;
+   const i0=Math.max(1,Math.floor(ci-rc)),i1=Math.min(N-2,Math.ceil(ci+rc));
+   const j0=Math.max(1,Math.floor(cj-rc)),j1=Math.min(N-2,Math.ceil(cj+rc));
+   for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+    const dx=(i-ci)*CELL,dz=(j-cj)*CELL,d=Math.hypot(dx,dz);
+    if(d>hw)continue;
+    const k=j*N+i;
+    const t=hR+Math.pow(d/hw,1.9)*depth*.30;
+    if(t<terrain[k]){terrain[k]=t;hard[k]=1}
+   }
+  }
+ };
+ if(rs.length>1){
+  const d0={x:rs[0].x-rs[1].x,z:rs[0].z-rs[1].z},l0=Math.hypot(d0.x,d0.z)||1;
+  rampa(rs[0],{x:d0.x/l0,z:d0.z/l0},h0,.30);
+  const dn={x:rs[rs.length-1].x-rs[rs.length-2].x,z:rs[rs.length-1].z-rs[rs.length-2].z},ln=Math.hypot(dn.x,dn.z)||1;
+  rampa(rs[rs.length-1],{x:dn.x/ln,z:dn.z/ln},h,-.30);
  }
  updateTerrainMesh();updateTerrainColors();syncGrass();
  /* v10.1: si no hay fuente ni agua cerca del inicio, crear un manantial pequeño y cebar el primer tramo */
@@ -1323,14 +1361,14 @@ function commitCanal(){
  let feed=false;
  for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<14){feed=true;break}}
  if(!feed){
-  const rr2=Math.max(2,Math.round(5/CELL));
+  const rr2=Math.max(1,Math.round(1.2/CELL));
   outer:
   for(let j=Math.max(1,sj-rr2);j<=Math.min(N-2,sj+rr2);j++)
    for(let i=Math.max(1,si-rr2);i<=Math.min(N-2,si+rr2);i++)
     if(water[j*N+i]>0.25){feed=true;break outer}
  }
  if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
-  sources.push({i:si,j:sj,rate:10});
+  sources.push({i:si,j:sj,rate:14});
   rebuildMarkers();
   const prime=Math.min(rs.length,Math.round(18/step));
   for(let s2=0;s2<prime;s2++){
