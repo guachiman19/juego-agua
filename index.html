@@ -1360,18 +1360,26 @@ function commitCanal(){
  });
  const skip=new Array(rs.length).fill(false),spans=[];
  {
-  let s2=3;
+  const raw=[];
+  let s2=2;
   while(s2<rs.length-3){
-   if(wet3[s2]>0.15){
+   if(wet3[s2]>0.05){
     let e2=s2;
-    while(e2<rs.length-3&&wet3[e2]>0.15)e2++;
-    const a2=s2-1,b2=Math.min(rs.length-4,e2);
-    if(b2-a2>=2&&b2-a2<=70){
-     for(let m=a2+1;m<b2;m++)skip[m]=true;
-     spans.push([a2,b2]);
-    }
+    while(e2<rs.length-3&&wet3[e2]>0.05)e2++;
+    /* margenes: el puente entra 3 muestras en tierra firme a cada lado */
+    const a2=Math.max(2,s2-3),b2=Math.min(rs.length-3,e2+2);
+    if(b2-a2>=2)raw.push([a2,b2]);
     s2=e2+1;
    } else s2++;
+  }
+  /* fusionar cruces cercanos (rios trenzados) en un solo puente */
+  for(const rgn of raw){
+   if(spans.length&&rgn[0]-spans[spans.length-1][1]<8)spans[spans.length-1][1]=rgn[1];
+   else spans.push(rgn);
+  }
+  for(let si2=spans.length-1;si2>=0;si2--){
+   if(spans[si2][1]-spans[si2][0]>110){spans.splice(si2,1);continue}
+   for(let m=spans[si2][0]+1;m<spans[si2][1];m++)skip[m]=true;
   }
  }
  let prot=null; /* celdas de rio bajo un acueducto: intocables */
@@ -1472,7 +1480,7 @@ function commitCanal(){
  const st0=rs[0];
  const si=Math.round((st0.x/WORLD+.5)*(N-1)),sj=Math.round((st0.z/WORLD+.5)*(N-1));
  let feed=false;
- for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<14){feed=true;break}}
+ for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<6){feed=true;break}}
  if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
   sources.push({i:si,j:sj,rate:14});
   rebuildMarkers();
