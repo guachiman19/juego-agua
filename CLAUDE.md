@@ -6,8 +6,9 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v11 (2026-09-01, commit 09c7e1f)
+## Estado actual: v11.1 (2026-09-01, commit f697c60)
 
+- v11.1 (feedback: "puente demasiado corto" y una C seca): deteccion de cruce con umbral 0.05 (antes 0.15 solo pillaba el nucleo profundo), el puente entra 3 muestras en tierra firme por cada lado (entradas/salidas del conducto en lecho excavado y con muros, no en celdas crudas del rio), cruces trenzados a <8 muestras se fusionan en UN puente largo, tope 110 muestras. Manantial de cabecera ahora solo se omite con una fuente a <6u (antes 14u dejaba secos los canales que nacen cerca del manantial de la cima). Verificado: C de 223 grados cruzando el rio 26/26 puntos mojados, cruce perpendicular rio intacto y entrega 5/6.
 - v11 (acueductos + manantial SIEMPRE, pedido de Jaime en dos mensajes):
   - MANANTIAL GARANTIZADO: al confirmar un canal se crea manantial rate 14 en el inicio salvo que ya haya una FUENTE a <14u. Se elimino la exencion por "agua cercana": no garantizaba alimentacion (screenshot de Jaime con canal en S seco).
   - ACUEDUCTOS: los tramos del trazo que cruzan agua existente (wet3>0.15 en 3x3, muestras 3..len-4, largo 2..70) NO se excavan: se registra un duct {ai,aj,bi,bj,ya,yb,yv,w} y en simStep un conducto mueve agua entry->exit por diferencia de superficie (q=min(wa*.5,(sa-sb)*.35)). La sim es un heightfield: agua sobre agua no existe, el conducto es teleporte + puente visual (rebuildDucts: tablero de piedra MAT_STONE con muros, franja de agua MAT_DWATER y pilares hasta el suelo; altura visual yv=max(media lechos, superficie del rio+1.05) porque con la altura real de los lechos el tablero queda enterrado).
