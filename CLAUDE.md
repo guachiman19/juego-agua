@@ -6,13 +6,14 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v10 (2026-09-01, commit 0b29e67)
+## Estado actual: v10.1 (2026-09-01, commit 68c7cb8)
 
 - v10 (controles manuales + herramienta Canal):
   - Pad de cámara fijo abajo a la derecha (`#campad`): girar izq/der, subir/bajar (pitch), acercar/alejar y "Vista inicial". Mantener presionado = movimiento continuo (`camHold` aplicado en el bucle con `applyCamHold(min(dtRaw,.12))`); pointer capture y pointercancel para no quedarse pegado. Teclado: flechas, +/-, H (guard: no roba teclas cuando el foco está en un INPUT). El pad se oculta en modo foto.
   - Herramienta "Canal" (botón 〰️): se dibuja una línea libre sobre el terreno (preview THREE.Line cian, depthTest off); al soltar, `commitCanal()` remuestrea el trazo cada .9 celdas y excava un lecho parabólico con perfil MONÓTONAMENTE descendente: h=min(h-slope*paso, tH0[s]-depth*.55). Pincel=ancho (hw=brush*.30 clamp 1.8-7), Intensidad=profundidad (1.1+strength*2.4), slope .055. Si el trazo sube una loma, corta más hondo para que el agua siga fluyendo.
   - BUG evitado (importante): el perfil debe calcularse con las alturas de ANTES de excavar (`tH0` precalculado). Releer terrainHeightAt durante la excavación retroalimenta (cada muestra ve el corte de la anterior) y cava cañones de 60 unidades.
   - Undo integrado (pushUndo al confirmar), syncGrass tras excavar, hint explica conectar un río o poner manantial.
+  - v10.1: tras excavar, si no hay fuente a <14u NI agua (>0.25) en radio 5u del inicio, se crea un manantial pequeño {rate:4.5} en el inicio (marcador incluido, se quita con la herramienta Manantial), y se ceban los primeros 18u del lecho con water=max(,.6). El undo lo revierte porque pushUndo guarda sources. Si nace en un río o junto a otra fuente, no añade nada.
 - v9 (sombras del agua sobre el terreno):
   - `waterMesh.castShadow=true` con un `customDepthMaterial` (MeshDepthMaterial RGBADepthPacking) cuyo vertex shader repite EXACTAMENTE el desplazamiento del agua (surfAt bilineal de tSurf + dep de tFlow, y=s+.04/-.06), de modo que la sombra proyectada coincide con la superficie visible.
   - Sombra parcial sin tocar las demas luces: en el fragment del depth material se descartan texeles con un dither ordenado 4x4 (`bay(gl_FragCoord.xy)`) segun opacidad por profundidad `shO=clamp(.25+dep*.22,0,.85)`; PCFSoft promedia el patron y queda sombra gris, mas densa cuanto mas honda el agua. dep<0.05 no proyecta (orillas limpias).
