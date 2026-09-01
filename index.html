@@ -38,6 +38,11 @@
  #stats{position:fixed;top:12px;right:14px;text-align:right;font-size:11px;opacity:.8;z-index:20;background:var(--panel);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:6px 12px;line-height:1.6}
  #pbtn{position:fixed;top:12px;left:280px;z-index:21;width:34px;height:34px;border-radius:10px;font-size:15px;transition:left .35s ease}
  #pbtn.off{left:12px}
+ #campad{position:fixed;right:14px;bottom:60px;z-index:20;display:flex;flex-direction:column;gap:5px;background:var(--panel);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:8px}
+ #campad .cpRow{display:flex;gap:5px;justify-content:center}
+ #campad button{width:38px;height:38px;border-radius:10px;font-size:16px;padding:0;touch-action:none;user-select:none;-webkit-user-select:none}
+ #campad button:active{background:rgba(77,216,255,.22);border-color:var(--acc)}
+ #campad .cpLbl{font-size:9px;text-align:center;opacity:.55;letter-spacing:.08em;margin-top:1px}
  @media(max-width:640px){#panel{width:214px}.tools{grid-template-columns:repeat(3,1fr)}#pbtn{left:240px}#pbtn.off{left:12px}}
 </style>
 </head>
@@ -68,6 +73,7 @@
   <button data-t="farol">🏮<span>Farol</span></button>
   <button data-t="puente">🌉<span>Puente</span></button>
   <button data-t="compuerta">🚪<span>Compuerta</span></button>
+  <button data-t="canal">〰️<span>Canal</span></button>
   <button data-t="bioma">🎨<span>Bioma</span></button>
   <button data-t="borrar">🧹<span>Borrar</span></button>
  </div>
@@ -113,6 +119,12 @@
 <button id="pbtn">☰</button>
 <div id="hint">Elige una herramienta y esculpe. El agua encontrará su camino.</div>
 <div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span><br/><span id="stQ">calidad: alta</span></div>
+<div id="campad">
+ <div class="cpRow"><button data-c="rotL" title="Girar a la izquierda (flecha izq)">⟲</button><button data-c="up" title="Vista más alta (flecha arriba)">▲</button><button data-c="rotR" title="Girar a la derecha (flecha der)">⟳</button></div>
+ <div class="cpRow"><button data-c="zin" title="Acercar (+)">＋</button><button data-c="down" title="Vista más baja (flecha abajo)">▼</button><button data-c="zout" title="Alejar (-)">－</button></div>
+ <div class="cpRow"><button data-c="home" title="Vista inicial (tecla H)" style="width:124px">⌂ Vista inicial</button></div>
+ <div class="cpLbl">CÁMARA</div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 'use strict';
@@ -1178,6 +1190,41 @@ function doUndo(){
 /* ================= CÁMARA ================= */
 const cam={th:.7,ph:1.02,rad:230,tx:0,ty:14,tz:0};
 const camG={th:.7,ph:1.02,rad:230,tx:0,ty:14,tz:0};
+const camHold={};
+function camHome(){Object.assign(camG,{th:.7,ph:1.02,rad:230,tx:0,tz:0});camG.ty=14}
+function applyCamHold(dt){
+ if(camHold.rotL)camG.th+=1.7*dt;
+ if(camHold.rotR)camG.th-=1.7*dt;
+ if(camHold.up)camG.ph=clamp(camG.ph-.95*dt,.12,1.5);
+ if(camHold.down)camG.ph=clamp(camG.ph+.95*dt,.12,1.5);
+ if(camHold.zin)camG.rad=clamp(camG.rad*Math.exp(-1.3*dt),7,340);
+ if(camHold.zout)camG.rad=clamp(camG.rad*Math.exp(1.3*dt),7,340);
+}
+function bindCamPad(){
+ document.querySelectorAll('#campad button[data-c]').forEach(b=>{
+  const a=b.dataset.c;
+  const off=()=>{camHold[a]=0};
+  b.addEventListener('pointerdown',ev=>{ev.preventDefault();ev.stopPropagation();
+   if(a==='home'){camHome();return}
+   camHold[a]=1;try{b.setPointerCapture(ev.pointerId)}catch(e){}});
+  b.addEventListener('pointerup',off);
+  b.addEventListener('pointercancel',off);
+  b.addEventListener('contextmenu',ev=>ev.preventDefault());
+ });
+}
+function camKey(e){
+ const t=e.target;
+ if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))return false;
+ const k=e.key;
+ if(k==='ArrowLeft'){camG.th+=.11;return true}
+ if(k==='ArrowRight'){camG.th-=.11;return true}
+ if(k==='ArrowUp'){camG.ph=clamp(camG.ph-.065,.12,1.5);return true}
+ if(k==='ArrowDown'){camG.ph=clamp(camG.ph+.065,.12,1.5);return true}
+ if(k==='+'||k==='='){camG.rad=clamp(camG.rad*.90,7,340);return true}
+ if(k==='-'||k==='_'){camG.rad=clamp(camG.rad/.90,7,340);return true}
+ if(k==='h'||k==='H'){camHome();return true}
+ return false;
+}
 function camApply(){
  const gh=terrainHeightAt(clamp(camG.tx,-110,110),clamp(camG.tz,-110,110));
  const desired=gh+2.5+camG.rad*.04;
@@ -1205,6 +1252,65 @@ function hitTerrain(ev){
  return h.length?h[0].point:null;
 }
 const CLICK_TOOLS={fuente:1,roca:1,pino:1,cerezo:1,bambu:1,arbusto:1,farol:1,puente:1,compuerta:1};
+/* ---- herramienta canal: dibujar un trayecto y excavarlo descendente ---- */
+let canalPts=[],canalLine=null;
+function updateCanalLine(){
+ if(!canalLine){
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(900*3),3));
+  canalLine=new THREE.Line(g,new THREE.LineBasicMaterial({color:0x4dd8ff,transparent:true,opacity:.95,depthTest:false}));
+  canalLine.renderOrder=9;canalLine.frustumCulled=false;scene.add(canalLine);
+ }
+ const a=canalLine.geometry.attributes.position.array,n=Math.min(canalPts.length,900);
+ for(let i=0;i<n;i++){const p=canalPts[i];a[i*3]=p.x;a[i*3+1]=terrainHeightAt(p.x,p.z)+.7;a[i*3+2]=p.z}
+ canalLine.geometry.setDrawRange(0,n);
+ canalLine.geometry.attributes.position.needsUpdate=true;
+ canalLine.visible=n>1;
+}
+function commitCanal(){
+ const pts=canalPts;canalPts=[];
+ if(canalLine)canalLine.visible=false;
+ const hintEl=document.getElementById('hint');
+ if(pts.length<2){hintEl.textContent='Dibuja una línea más larga para trazar el canal.';return}
+ pushUndo();
+ const step=CELL*.9,rs=[{x:pts[0].x,z:pts[0].z}];
+ for(let i=1;i<pts.length;i++){
+  let a=rs[rs.length-1];const b=pts[i];
+  let d=Math.hypot(b.x-a.x,b.z-a.z);
+  while(d>step){
+   const t=step/d;
+   const nx=a.x+(b.x-a.x)*t,nz=a.z+(b.z-a.z)*t;
+   rs.push({x:nx,z:nz});a=rs[rs.length-1];d=Math.hypot(b.x-a.x,b.z-a.z);
+  }
+ }
+ rs.push({x:pts[pts.length-1].x,z:pts[pts.length-1].z});
+ const depth=1.1+P.strength*2.4;
+ const hw=clamp(P.brush*.30,1.8,7);
+ const R=hw*1.8,slope=.055;
+ const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
+ let h=tH0[0]-depth;
+ for(let s=0;s<rs.length;s++){
+  const q=rs[s];
+  if(s)h-=slope*step;
+  h=Math.min(h,tH0[s]-depth*.55);
+  const ci=(q.x/WORLD+.5)*(N-1),cj=(q.z/WORLD+.5)*(N-1);
+  const rc=R/CELL;
+  const i0=Math.max(1,Math.floor(ci-rc)),i1=Math.min(N-2,Math.ceil(ci+rc));
+  const j0=Math.max(1,Math.floor(cj-rc)),j1=Math.min(N-2,Math.ceil(cj+rc));
+  const edgeH=h+depth*.5;
+  for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+   const dx=(i-ci)*CELL,dz=(j-cj)*CELL,d=Math.hypot(dx,dz);
+   if(d>R)continue;
+   const k=j*N+i;
+   let target;
+   if(d<hw)target=h+Math.pow(d/hw,1.7)*depth*.5;
+   else{const f=(d-hw)/(R-hw);target=edgeH*(1-f)+terrain[k]*f}
+   if(target<terrain[k])terrain[k]=target;
+  }
+ }
+ updateTerrainMesh();updateTerrainColors();syncGrass();
+ hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir. Conéctalo a un río o pon un manantial en su inicio.';
+}
 const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
  if(ev.target!==renderer.domElement)return;
@@ -1217,6 +1323,7 @@ function onDown(ev){
  if(ev.button===1||ev.shiftKey){mode='pan';return}
  if(ev.button===0){
   if(P.tool==='mirar'){mode='rot';return}
+  if(P.tool==='canal'){const p=hitTerrain(ev);if(p){mode='canal';canalPts=[p];updateCanalLine()}return}
   const p=hitTerrain(ev);
   if(CLICK_TOOLS[P.tool]){if(p)toolClick(p);mode=null;return}
   if(BRUSH_TOOLS[P.tool]){painting=true;lastHit=p;mode='paint';strokeUndo=false}
@@ -1236,12 +1343,14 @@ function onMove(ev){
   camG.tz+=Math.sin(cam.th)*dx*s+Math.cos(cam.th)*dy*s;
   camG.tx=clamp(camG.tx,-130,130);camG.tz=clamp(camG.tz,-130,130);
  }
+ else if(mode==='canal'){const p=hitTerrain(ev);if(p){const l=canalPts[canalPts.length-1];if(Math.hypot(p.x-l.x,p.z-l.z)>1.2){canalPts.push(p);updateCanalLine()}}}
  else if(mode==='paint'){const p=hitTerrain(ev);if(p)lastHit=p}
 }
 function onUp(ev){
  ptrs.delete(ev.pointerId);
  if(mode==='pinch'&&ptrs.size<2)mode=null;
  if(mode==='paint'){painting=false;mode=null;syncGrass()}
+ else if(mode==='canal'){mode=null;commitCanal()}
  else if(mode==='rot'||mode==='pan')mode=null;
 }
 /* ================= HERRAMIENTAS ================= */
@@ -1332,7 +1441,7 @@ function audioOn(){
 function audioOff(){if(gnode&&actx)gnode.gain.setTargetAtTime(0,actx.currentTime,.2)}
 /* ================= MODO FOTO ================= */
 function photoMode(){
- const ids=['panel','hint','stats','pbtn'];
+ const ids=['panel','hint','stats','pbtn','campad'];
  const els=ids.map(id=>document.getElementById(id));
  els.forEach(e=>{if(e)e.style.visibility='hidden'});
  const w=innerWidth,h=innerHeight;
@@ -1363,7 +1472,7 @@ function photoMode(){
  }
 }
 /* ================= UI ================= */
-const HINTS={mirar:'Arrastra para orbitar. Acércate con la rueda hasta ver los arroyos de cerca.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.'};
+const HINTS={mirar:'Arrastra para orbitar y usa la rueda para acercarte. También sirven los botones de cámara (abajo a la derecha), las flechas del teclado, + y -.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.',canal:'Dibuja una línea libre sobre el terreno: al soltar se excava un canal que siempre desciende siguiendo tu trazo. El Pincel controla el ancho y la Intensidad la profundidad.'};
 let dayTime=100/240;
 function applyDayTime(){
  const th=(dayTime-.25)*6.28318;
@@ -1440,8 +1549,10 @@ function bindUI(){
  $('bPhoto').addEventListener('click',photoMode);
  window.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();doUndo();return}
-  if(e.key.toLowerCase()==='f'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){photoMode()}
+  if(e.key.toLowerCase()==='f'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){photoMode();return}
+  if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&camKey(e))e.preventDefault();
  });
+ bindCamPad();
  $('pbtn').addEventListener('click',()=>{$('panel').classList.toggle('off');$('pbtn').classList.toggle('off')});
  const cv=renderer.domElement;
  cv.addEventListener('pointerdown',onDown);
@@ -1497,6 +1608,7 @@ function loop(){
  if(autosaveT>25){autosaveT=0;try{localStorage.setItem('nacimiento_v2',serializeGame())}catch(e){}}
  waterMesh.material.uniforms.uT.value=uT;
  if(terrainShader)terrainShader.uniforms.uTime.value=uT;
+ applyCamHold(Math.min(dtRaw,.12));
  camApply();
  renderFrame();
  frame++;
