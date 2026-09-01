@@ -6,8 +6,9 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v10.1 (2026-09-01, commit 68c7cb8)
+## Estado actual: v10.2 (2026-09-01, commit 3192703)
 
+- v10.2 (ajustes por feedback de Jaime): canales mas profundos (depth=1.8+strength*3.4, corte minimo .72*depth, lecho pow 1.9 con amplitud .38: mas seccion util), manantial automatico rate 10 (igual a uno manual por defecto) y cebado a 1.0; los botones/flechas arriba-abajo ya NO inclinan (pitch) sino que mueven la camara en Y puro via camG.hOff (clamp -24..150) sumado en camApply a la altura objetivo; H/Vista inicial resetea hOff. El pitch queda solo en el arrastre del raton.
 - v10 (controles manuales + herramienta Canal):
   - Pad de cámara fijo abajo a la derecha (`#campad`): girar izq/der, subir/bajar (pitch), acercar/alejar y "Vista inicial". Mantener presionado = movimiento continuo (`camHold` aplicado en el bucle con `applyCamHold(min(dtRaw,.12))`); pointer capture y pointercancel para no quedarse pegado. Teclado: flechas, +/-, H (guard: no roba teclas cuando el foco está en un INPUT). El pad se oculta en modo foto.
   - Herramienta "Canal" (botón 〰️): se dibuja una línea libre sobre el terreno (preview THREE.Line cian, depthTest off); al soltar, `commitCanal()` remuestrea el trazo cada .9 celdas y excava un lecho parabólico con perfil MONÓTONAMENTE descendente: h=min(h-slope*paso, tH0[s]-depth*.55). Pincel=ancho (hw=brush*.30 clamp 1.8-7), Intensidad=profundidad (1.1+strength*2.4), slope .055. Si el trazo sube una loma, corta más hondo para que el agua siga fluyendo.
