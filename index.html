@@ -242,9 +242,9 @@ let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bott
 let reflRT=null,refrRT=null,reflCam=null,texMat=null,sun=null,hemi=null,moon=null;
 let sceneRT=null,bloomA=null,bloomB=null,quadScene=null,quadCam=null,quadMesh=null,matBright=null,matBlur=null,matComp=null,terrainShader=null;
 const reflPlaneN=new THREE.Vector3(0,1,0);let reflLevel=0,forceRefl=false;
-const QS=[{scn:.70,refl:0,refr:.34,bloom:.10,every:3,pr:1,foam:.35},
- {scn:.85,refl:.34,refr:.42,bloom:.16,every:3,pr:1.5,foam:.70},
- {scn:1,refl:.50,refr:.50,bloom:.25,every:2,pr:2,foam:1}];
+const QS=[{scn:.70,refl:0,refr:.34,bloom:.10,every:3,pr:1,foam:.35,shad:0},
+ {scn:.85,refl:.34,refr:.42,bloom:.16,every:3,pr:1.5,foam:.70,shad:1},
+ {scn:1,refl:.50,refr:.50,bloom:.25,every:2,pr:2,foam:1,shad:1}];
 let inst={},walls=[];
 let tPos,tNor,tCol,fPos,fAlp,fSize;
 let wDatS,wDatF,texSurf,texFlow;
@@ -447,6 +447,27 @@ function setupScene(){
    'a=clamp(a,0.,.96);\n'+
    'gl_FragColor=vec4(col,a);}'}));
  waterMesh.renderOrder=2;scene.add(waterMesh);
+ /* v9: material de profundidad para que el agua proyecte sombra sobre el terreno */
+ const wDepth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});
+ wDepth.onBeforeCompile=sh=>{
+  sh.uniforms.tSurf={value:texSurf};sh.uniforms.tFlow={value:texFlow};
+  sh.vertexShader='uniform sampler2D tSurf;uniform sampler2D tFlow;varying float vDep;\n'+
+   'float dec(vec4 c){return (c.r*65280.+c.g*255.)/65535.*102.-6.;}\n'+
+   'float surfAt(vec2 u){\n'+
+   ' vec2 p=u*256.-.5;vec2 f=fract(p);vec2 c0=(floor(p)+.5)/256.;\n'+
+   ' float s00=dec(texture2D(tSurf,c0));float s10=dec(texture2D(tSurf,c0+vec2(1./256.,0.)));\n'+
+   ' float s01=dec(texture2D(tSurf,c0+vec2(0.,1./256.)));float s11=dec(texture2D(tSurf,c0+vec2(1./256.,1./256.)));\n'+
+   ' return mix(mix(s00,s10,f.x),mix(s01,s11,f.x),f.y);}\n'+sh.vertexShader;
+  sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>',
+   'float s=surfAt(uv);float dep=texture2D(tFlow,uv).r*8.;vDep=dep;\n'+
+   'vec3 transformed=vec3(position.x,s+(dep>0.006?0.04:-0.06),position.z);');
+  sh.fragmentShader='varying float vDep;\n'+
+   'float bay(vec2 p){vec2 a=floor(mod(p,2.));vec2 b=floor(mod(p*.5,2.));return ((a.x+a.y*2.)*4.+b.x+b.y*2.+.5)/16.;}\n'+sh.fragmentShader;
+  sh.fragmentShader=sh.fragmentShader.replace('void main() {',
+   'void main() {\n if(vDep<0.05) discard;\n float shO=clamp(.25+vDep*.22,0.,.85);\n if(bay(gl_FragCoord.xy)>shO) discard;');
+ };
+ waterMesh.customDepthMaterial=wDepth;
+ waterMesh.castShadow=QS[P.quality].shad>0;
  /* diorama: paredes y fondo */
  buildWalls();
  bottomMesh=new THREE.Mesh(new THREE.BoxGeometry(WORLD+.6,8,WORLD+.6),new THREE.MeshStandardMaterial({color:0x33241a,roughness:1}));
@@ -632,6 +653,7 @@ function setQuality(q,fromAuto){
  renderer.setSize(innerWidth,innerHeight,false);
  resizePost(innerWidth,innerHeight);
  if(waterMesh)waterMesh.material.uniforms.uReflOn.value=qs.refl>0?1:0;
+ if(waterMesh)waterMesh.castShadow=qs.shad>0;
  const lab=['baja','media','alta'][P.quality];
  const e=document.getElementById('stQ');
  if(e)e.textContent='calidad: '+lab+(P.autoQ?' (auto)':'');
@@ -639,6 +661,7 @@ function setQuality(q,fromAuto){
 }
 function renderFrame(){
  renderWaterPasses();
+ renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;
  if(!sceneRT){renderer.render(scene,camera);return}
  renderer.setRenderTarget(sceneRT);
  renderer.render(scene,camera);
@@ -1316,7 +1339,7 @@ function photoMode(){
  const scale=Math.min(2,4096/Math.max(w,h));
  const q0=P.quality,a0=P.autoQ;
  P.autoQ=false;P.quality=2;
- if(waterMesh)waterMesh.material.uniforms.uReflOn.value=1;
+ if(waterMesh){waterMesh.material.uniforms.uReflOn.value=1;waterMesh.castShadow=true}
  renderer.setSize(w*scale,h*scale,false);
  resizePost(w*scale,h*scale);
  forceRefl=true;
@@ -1324,7 +1347,7 @@ function photoMode(){
  let url=null;
  try{url=renderer.domElement.toDataURL('image/png')}catch(e){}
  P.quality=q0;P.autoQ=a0;
- if(waterMesh)waterMesh.material.uniforms.uReflOn.value=QS[P.quality].refl>0?1:0;
+ if(waterMesh){waterMesh.material.uniforms.uReflOn.value=QS[P.quality].refl>0?1:0;waterMesh.castShadow=QS[P.quality].shad>0}
  renderer.setSize(w,h,false);
  resizePost(w,h);
  els.forEach(e=>{if(e)e.style.visibility=''});
