@@ -6,8 +6,9 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v11.1 (2026-09-01, commit f697c60)
+## Estado actual: v11.2 (2026-09-01, commit e3003a0)
 
+- v11.2 (feedback: "que los puentes no aparezcan automaticamente" + mover camara en X): el acueducto es OPT-IN via casilla "Acueducto en cruces del canal" (P.aqueduct, apagada por defecto; el span-detect entero va dentro de if(P.aqueduct), sin ella el canal se UNE al agua que cruza como en v10.4). La herramienta Borrar tambien elimina puentes (distancia al centro del duct < pincel+4, rebuildDucts). Pad de camara reorganizado: fila 2 = ◀ ▼ ▶ (pan lateral con mantener presionado, velocidad 9+rad*.09 u/s en el eje derecho de la camara: right=(cos th,0,-sin th)), fila 3 = + y - anchos; teclas A/D para pan. Verificado: toggle off no crea puente, on si, Borrar lo quita, pan y H funcionan.
 - v11.1 (feedback: "puente demasiado corto" y una C seca): deteccion de cruce con umbral 0.05 (antes 0.15 solo pillaba el nucleo profundo), el puente entra 3 muestras en tierra firme por cada lado (entradas/salidas del conducto en lecho excavado y con muros, no en celdas crudas del rio), cruces trenzados a <8 muestras se fusionan en UN puente largo, tope 110 muestras. Manantial de cabecera ahora solo se omite con una fuente a <6u (antes 14u dejaba secos los canales que nacen cerca del manantial de la cima). Verificado: C de 223 grados cruzando el rio 26/26 puntos mojados, cruce perpendicular rio intacto y entrega 5/6.
 - v11 (acueductos + manantial SIEMPRE, pedido de Jaime en dos mensajes):
   - MANANTIAL GARANTIZADO: al confirmar un canal se crea manantial rate 14 en el inicio salvo que ya haya una FUENTE a <14u. Se elimino la exencion por "agua cercana": no garantizaba alimentacion (screenshot de Jaime con canal en S seco).
