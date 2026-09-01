@@ -6,8 +6,9 @@ Contexto para Claude Chat, Claude Code, Claude Cowork y Claude for Chrome. Mante
 
 "Nacimiento": juego 3D en un solo archivo HTML (`index.html`) que simula flujos de agua desde un manantial en la cima de una montaña. El agua erosiona el terreno y forma ríos, cascadas, lagos y jardines japoneses. Proyecto de Jaime (jaimedorado@gmail.com). Idioma: español.
 
-## Estado actual: v10.2 (2026-09-01, commit 3192703)
+## Estado actual: v10.3 (2026-09-01, commit 0240ab7)
 
+- v10.3 (fix clave del canal, feedback con screenshot de espiral): en ladera empinada el canal excavado con solo min() quedaba abierto por el lado de bajada y el agua se derramaba monte abajo sin usar el trazo. Ahora la seccion es de ACEQUIA con asignacion EXACTA de terreno: lecho parabolico (=h+pow(d/hw,1.9)*depth*.30, excava Y RELLENA para dar piso solido), anillo de muro a bankTop=h+depth*.92 (levanta el lado de bajada, rebanca el de subida) y transicion lerp al terreno natural (bw=max(1.7,hw*.42), R=hw+bw+2.4). Verificado con espiral de 2.5 vueltas alrededor del cono: 60/66 puntos mojados y 0 fugas a 7u ladera abajo tras 900 simStep.
 - v10.2 (ajustes por feedback de Jaime): canales mas profundos (depth=1.8+strength*3.4, corte minimo .72*depth, lecho pow 1.9 con amplitud .38: mas seccion util), manantial automatico rate 10 (igual a uno manual por defecto) y cebado a 1.0; los botones/flechas arriba-abajo ya NO inclinan (pitch) sino que mueven la camara en Y puro via camG.hOff (clamp -24..150) sumado en camApply a la altura objetivo; H/Vista inicial resetea hOff. El pitch queda solo en el arrastre del raton.
 - v10 (controles manuales + herramienta Canal):
   - Pad de cámara fijo abajo a la derecha (`#campad`): girar izq/der, subir/bajar (pitch), acercar/alejar y "Vista inicial". Mantener presionado = movimiento continuo (`camHold` aplicado en el bucle con `applyCamHold(min(dtRaw,.12))`); pointer capture y pointercancel para no quedarse pegado. Teclado: flechas, +/-, H (guard: no roba teclas cuando el foco está en un INPUT). El pad se oculta en modo foto.
