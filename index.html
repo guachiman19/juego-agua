@@ -120,8 +120,8 @@
 <div id="hint">Elige una herramienta y esculpe. El agua encontrará su camino.</div>
 <div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span><br/><span id="stQ">calidad: alta</span></div>
 <div id="campad">
- <div class="cpRow"><button data-c="rotL" title="Girar a la izquierda (flecha izq)">⟲</button><button data-c="up" title="Vista más alta (flecha arriba)">▲</button><button data-c="rotR" title="Girar a la derecha (flecha der)">⟳</button></div>
- <div class="cpRow"><button data-c="zin" title="Acercar (+)">＋</button><button data-c="down" title="Vista más baja (flecha abajo)">▼</button><button data-c="zout" title="Alejar (-)">－</button></div>
+ <div class="cpRow"><button data-c="rotL" title="Girar a la izquierda (flecha izq)">⟲</button><button data-c="up" title="Subir cámara (flecha arriba)">▲</button><button data-c="rotR" title="Girar a la derecha (flecha der)">⟳</button></div>
+ <div class="cpRow"><button data-c="zin" title="Acercar (+)">＋</button><button data-c="down" title="Bajar cámara (flecha abajo)">▼</button><button data-c="zout" title="Alejar (-)">－</button></div>
  <div class="cpRow"><button data-c="home" title="Vista inicial (tecla H)" style="width:124px">⌂ Vista inicial</button></div>
  <div class="cpLbl">CÁMARA</div>
 </div>
@@ -1189,14 +1189,14 @@ function doUndo(){
 }
 /* ================= CÁMARA ================= */
 const cam={th:.7,ph:1.02,rad:230,tx:0,ty:14,tz:0};
-const camG={th:.7,ph:1.02,rad:230,tx:0,ty:14,tz:0};
+const camG={th:.7,ph:1.02,rad:230,tx:0,ty:14,tz:0,hOff:0};
 const camHold={};
-function camHome(){Object.assign(camG,{th:.7,ph:1.02,rad:230,tx:0,tz:0});camG.ty=14}
+function camHome(){Object.assign(camG,{th:.7,ph:1.02,rad:230,tx:0,tz:0,hOff:0});camG.ty=14}
 function applyCamHold(dt){
  if(camHold.rotL)camG.th+=1.7*dt;
  if(camHold.rotR)camG.th-=1.7*dt;
- if(camHold.up)camG.ph=clamp(camG.ph-.95*dt,.12,1.5);
- if(camHold.down)camG.ph=clamp(camG.ph+.95*dt,.12,1.5);
+ if(camHold.up)camG.hOff=clamp(camG.hOff+26*dt,-24,150);
+ if(camHold.down)camG.hOff=clamp(camG.hOff-26*dt,-24,150);
  if(camHold.zin)camG.rad=clamp(camG.rad*Math.exp(-1.3*dt),7,340);
  if(camHold.zout)camG.rad=clamp(camG.rad*Math.exp(1.3*dt),7,340);
 }
@@ -1218,8 +1218,8 @@ function camKey(e){
  const k=e.key;
  if(k==='ArrowLeft'){camG.th+=.11;return true}
  if(k==='ArrowRight'){camG.th-=.11;return true}
- if(k==='ArrowUp'){camG.ph=clamp(camG.ph-.065,.12,1.5);return true}
- if(k==='ArrowDown'){camG.ph=clamp(camG.ph+.065,.12,1.5);return true}
+ if(k==='ArrowUp'){camG.hOff=clamp(camG.hOff+4,-24,150);return true}
+ if(k==='ArrowDown'){camG.hOff=clamp(camG.hOff-4,-24,150);return true}
  if(k==='+'||k==='='){camG.rad=clamp(camG.rad*.90,7,340);return true}
  if(k==='-'||k==='_'){camG.rad=clamp(camG.rad/.90,7,340);return true}
  if(k==='h'||k==='H'){camHome();return true}
@@ -1227,7 +1227,7 @@ function camKey(e){
 }
 function camApply(){
  const gh=terrainHeightAt(clamp(camG.tx,-110,110),clamp(camG.tz,-110,110));
- const desired=gh+2.5+camG.rad*.04;
+ const desired=gh+2.5+camG.rad*.04+camG.hOff;
  camG.ty+=(desired-camG.ty)*.06;
  cam.th+=(camG.th-cam.th)*.14;cam.ph+=(camG.ph-cam.ph)*.14;cam.rad+=(camG.rad-cam.rad)*.16;
  cam.tx+=(camG.tx-cam.tx)*.18;cam.ty+=(camG.ty-cam.ty)*.18;cam.tz+=(camG.tz-cam.tz)*.18;
@@ -1284,7 +1284,7 @@ function commitCanal(){
   }
  }
  rs.push({x:pts[pts.length-1].x,z:pts[pts.length-1].z});
- const depth=1.1+P.strength*2.4;
+ const depth=1.8+P.strength*3.4;
  const hw=clamp(P.brush*.30,1.8,7);
  const R=hw*1.8,slope=.055;
  const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
@@ -1292,18 +1292,18 @@ function commitCanal(){
  for(let s=0;s<rs.length;s++){
   const q=rs[s];
   if(s)h-=slope*step;
-  h=Math.min(h,tH0[s]-depth*.55);
+  h=Math.min(h,tH0[s]-depth*.72);
   const ci=(q.x/WORLD+.5)*(N-1),cj=(q.z/WORLD+.5)*(N-1);
   const rc=R/CELL;
   const i0=Math.max(1,Math.floor(ci-rc)),i1=Math.min(N-2,Math.ceil(ci+rc));
   const j0=Math.max(1,Math.floor(cj-rc)),j1=Math.min(N-2,Math.ceil(cj+rc));
-  const edgeH=h+depth*.5;
+  const edgeH=h+depth*.38;
   for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
    const dx=(i-ci)*CELL,dz=(j-cj)*CELL,d=Math.hypot(dx,dz);
    if(d>R)continue;
    const k=j*N+i;
    let target;
-   if(d<hw)target=h+Math.pow(d/hw,1.7)*depth*.5;
+   if(d<hw)target=h+Math.pow(d/hw,1.9)*depth*.38;
    else{const f=(d-hw)/(R-hw);target=edgeH*(1-f)+terrain[k]*f}
    if(target<terrain[k])terrain[k]=target;
   }
@@ -1322,13 +1322,13 @@ function commitCanal(){
     if(water[j*N+i]>0.25){feed=true;break outer}
  }
  if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
-  sources.push({i:si,j:sj,rate:4.5});
+  sources.push({i:si,j:sj,rate:10});
   rebuildMarkers();
   const prime=Math.min(rs.length,Math.round(18/step));
   for(let s2=0;s2<prime;s2++){
    const q2=rs[s2];
    const ii=Math.round((q2.x/WORLD+.5)*(N-1)),jj=Math.round((q2.z/WORLD+.5)*(N-1));
-   if(ii>0&&ii<N-1&&jj>0&&jj<N-1){const k2=jj*N+ii;water[k2]=Math.max(water[k2],.6)}
+   if(ii>0&&ii<N-1&&jj>0&&jj<N-1){const k2=jj*N+ii;water[k2]=Math.max(water[k2],1.0)}
   }
   hintEl.textContent='Canal excavado y manantial pequeño añadido en su inicio porque no había agua cerca. Quítalo con la herramienta Manantial si sobra.';
  } else hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir.';
