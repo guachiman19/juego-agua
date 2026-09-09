@@ -71,6 +71,9 @@
   <button data-t="bambu">🎍<span>Bambú</span></button>
   <button data-t="arbusto">🌳<span>Arbusto</span></button>
   <button data-t="farol">🏮<span>Farol</span></button>
+  <button data-t="losa">🥌<span>Pasadera</span></button>
+  <button data-t="torii">⛩️<span>Torii</span></button>
+  <button data-t="tsukubai">🏺<span>Tsukubai</span></button>
   <button data-t="puente">🌉<span>Puente</span></button>
   <button data-t="compuerta">🚪<span>Compuerta</span></button>
   <button data-t="canal">〰️<span>Canal</span></button>
@@ -83,6 +86,7 @@
   <button class="bio" data-b="1" style="background:#c9a86a" title="Arena"></button>
   <button class="bio" data-b="2" style="background:#3f6b38" title="Musgo"></button>
   <button class="bio" data-b="3" style="background:#dfe4ea" title="Nieve"></button>
+  <button class="bio" data-b="4" style="background:#c8c4b8" title="Grava rastrillada"></button>
  </div>
  <div class="sec">Ajustes</div>
  <div class="sl"><label>Pincel</label><input id="sBrush" type="range" min="4" max="34" step="1" value="14"/><b id="vBrush">14</b></div>
@@ -222,17 +226,149 @@ function applyPreset(name){
  const g=name==='valle'?genValle:(name==='jardin'?genJardin:genMontana);
  for(let j=0;j<N;j++)for(let i=0;i<N;i++)terrain[idx(i,j)]=g(i/(N-1),j/(N-1));
  const pu=(u,v)=>({x:(u-.5)*WORLD,z:(v-.5)*WORLD});
+ const biomeDisc=(uc,vc,ru,val)=>{
+  const ci=uc*(N-1),cj=vc*(N-1),rc=ru/CELL;
+  for(let j=Math.max(0,Math.floor(cj-rc));j<=Math.min(N-1,Math.ceil(cj+rc));j++)
+   for(let i=Math.max(0,Math.floor(ci-rc));i<=Math.min(N-1,Math.ceil(ci+rc));i++)
+    if(Math.hypot(i-ci,j-cj)<=rc)biome[idx(i,j)]=val;
+ };
+ const digPond=(uc,vc,ru,dep)=>{
+  const ci=uc*(N-1),cj=vc*(N-1),rc=ru/CELL;
+  let rim=1e9;
+  for(let j=Math.max(1,Math.floor(cj-rc));j<=Math.min(N-2,Math.ceil(cj+rc));j++)
+   for(let i=Math.max(1,Math.floor(ci-rc));i<=Math.min(N-2,Math.ceil(ci+rc));i++)
+    if(Math.hypot(i-ci,j-cj)<=rc)rim=Math.min(rim,terrain[idx(i,j)]);
+  const rc2=rc*1.3;
+  for(let j=Math.max(1,Math.floor(cj-rc2));j<=Math.min(N-2,Math.ceil(cj+rc2));j++)
+   for(let i=Math.max(1,Math.floor(ci-rc2));i<=Math.min(N-2,Math.ceil(ci+rc2));i++){
+    const d=Math.hypot(i-ci,j-cj)/rc,k=idx(i,j);
+    if(d>1.3)continue;
+    if(d<=1){terrain[k]=Math.min(terrain[k],rim-dep*Math.cos(d*1.5708));hard[k]=1}
+    else{const f=(d-1)/.3;terrain[k]=Math.min(terrain[k],(rim+.35)*(1-f)+terrain[k]*f)}
+   }
+  return rim;
+ };
+ const carveRill=(way,hw,dep,mean,yEnd)=>{
+  const pts=[];
+  for(let w=0;w<way.length-1;w++){
+   const i0=way[w][0],j0=way[w][1],i1=way[w+1][0],j1=way[w+1][1];
+   const L=Math.max(4,Math.round(Math.hypot(i1-i0,j1-j0))),LS=L*3;
+   const pdx=-(j1-j0)/L,pdy=(i1-i0)/L;
+   for(let q=(w?1:0);q<=LS;q++){
+    const t=q/LS,sw=Math.sin(t*Math.PI)*L*mean*Math.sin(t*6.1+1.1+w*2.3);
+    const ci=Math.round(i0+(i1-i0)*t+pdx*sw),cj=Math.round(j0+(j1-j0)*t+pdy*sw);
+    if(ci<3||cj<3||ci>N-4||cj>N-4)continue;
+    pts.push([ci,cj]);
+   }
+  }
+  if(pts.length<2)return pts;
+  /* alturas ORIGINALES antes de excavar: releerlas durante el excavado se retroalimenta y cava cañones */
+  const t0=pts.map(q=>terrain[idx(q[0],q[1])]);
+  const yA=t0[0]-dep*.9;
+  const yB=(yEnd===undefined?t0[t0.length-1]-dep*.9:yEnd);
+  const rc=Math.max(1,Math.ceil((hw+CELL*1.7)/CELL));
+  const core=new Uint8Array(NN);
+  let prev=1e9;
+  for(let q=0;q<pts.length;q++){
+   const f=q/(pts.length-1);
+   let bed=yA+(yB-yA)*f;
+   bed=Math.min(bed,t0[q]-dep*.7);
+   bed=Math.min(bed,prev-.004);
+   prev=bed;
+   const ci=pts[q][0],cj=pts[q][1];
+   for(let dj=-rc;dj<=rc;dj++)for(let di=-rc;di<=rc;di++){
+    const ii=ci+di,jj=cj+dj;
+    if(ii<1||jj<1||ii>N-2||jj>N-2)continue;
+    const d=Math.hypot(di,dj)*CELL,k=idx(ii,jj);
+    if(d>=hw+CELL*1.7)continue;
+    if(d<hw){
+     const tgt=bed+Math.pow(d/hw,1.8)*dep*.35;
+     /* corta siempre; rellena solo un poco (no tapa el estanque ni hondonadas) */
+     if(core[k])terrain[k]=Math.min(terrain[k],tgt);
+     else if(tgt<terrain[k]||tgt-terrain[k]<dep*1.4)terrain[k]=tgt;
+     core[k]=1;hard[k]=1;
+    }else if(!core[k]){
+     const fr=(d-hw)/(CELL*1.7),tgt=(bed+dep*.85)*(1-fr)+terrain[k]*fr;
+     if(tgt<terrain[k]||tgt-terrain[k]<dep*1.4)terrain[k]=tgt;
+    }
+   }
+  }
+  return pts;
+ };
  if(name==='montana'){const s=highestNear(.5,.40,10);sources.push({i:s.i,j:s.j,rate:12});bridgeFromPath(carveChannel(s.i,s.j),.72);}
  else if(name==='valle'){const a=highestNear(.5,.08,12);sources.push({i:a.i,j:a.j,rate:10});bridgeFromPath(carveChannel(a.i,a.j),.5);const b=highestNear(.2,.18,10);sources.push({i:b.i,j:b.j,rate:5});carveChannel(b.i,b.j);
  }
- else{const a=highestNear(.72,.2,8);sources.push({i:a.i,j:a.j,rate:5});
-  bridgeFromPath(carveTo(a.i,a.j,Math.round(.55*(N-1)),Math.round(.7*(N-1))),.55);
-  const deco=[['roca',.50,.63,1.3],['roca',.60,.74,1.1],['roca',.49,.77,.9],['roca',.63,.66,.8],['roca',.44,.70,1.0],['farol',.46,.64,1],['farol',.65,.77,1],['cerezo',.40,.74,1.1],['cerezo',.68,.60,1.3],['pino',.30,.30,1.2],['pino',.80,.34,1],['roca',.73,.24,.9],['roca',.70,.17,.7],['bambu',.78,.45,1.1],['bambu',.81,.49,.9],['bambu',.76,.51,1],['arbusto',.35,.68,1],['arbusto',.58,.58,.9],['arbusto',.30,.33,1.1]];
-  for(const d of deco){const p=pu(d[1],d[2]);objects.push({type:d[0],x:p.x,z:p.z,s:d[3],ry:hash2(d[1]*9,d[2]*7)*6.28})}
-  for(const o of objects)if(o.type==='roca')rockBump(o.x,o.z,o.s*0.7);
+ else{
+  /* ================= Jardín japonés completo ================= */
+  const IJ=(u,v)=>({i:Math.round(u*(N-1)),j:Math.round(v*(N-1))});
+  const add=(type,u,v,sc,ry)=>{const q=pu(u,v);objects.push({type:type,x:q.x,z:q.z,s:sc,ry:ry===undefined?hash2(u*91,v*57)*6.28:ry})};
+  /* estanque de carpas y estanque menor */
+  const rimA=digPond(.52,.72,23,2.4);
+  const rimB=digPond(.34,.52,9.5,1.2);
+  /* arroyo diminuto: manantial alto -> estanque, con meandros */
+  const s0=IJ(.79,.17);
+  sources.push({i:s0.i,j:s0.j,rate:1.0});
+  const wp=[[s0.i,s0.j],[IJ(.72,.27).i,IJ(.72,.27).j],[IJ(.66,.40).i,IJ(.66,.40).j],
+   [IJ(.61,.50).i,IJ(.61,.50).j],[IJ(.58,.58).i,IJ(.58,.58).j],[IJ(.545,.65).i,IJ(.545,.65).j],
+   [IJ(.53,.70).i,IJ(.53,.70).j]];
+  const rp=carveRill(wp,1.0,1.05,.14,rimA-.35);
+  const wp2=[[IJ(.66,.40).i,IJ(.66,.40).j],[IJ(.55,.40).i,IJ(.55,.40).j],
+   [IJ(.46,.45).i,IJ(.46,.45).j],[IJ(.375,.50).i,IJ(.375,.50).j]];
+  carveRill(wp2,.9,.85,.18,rimB-.3);
+  /* karesansui: patio de grava rastrillada */
+  biomeDisc(.26,.31,27,4);
+  biomeDisc(.345,.235,13,4);
+  /* sendero de tierra: torii -> grava -> estanque */
+  const sd=[[.13,.53],[.20,.50],[.27,.45],[.34,.42],[.41,.49],[.45,.58],[.47,.66],[.50,.71]];
+  for(let q=0;q<sd.length-1;q++)for(let t=0;t<=10;t++){
+   const u=sd[q][0]+(sd[q+1][0]-sd[q][0])*t/10,v=sd[q][1]+(sd[q+1][1]-sd[q][1])*t/10;
+   biomeDisc(u,v,3.4,1);
+  }
+  /* torii de entrada y tsukubai (lavabo de piedra) */
+  add('torii',.135,.53,1.15,1.5708);
+  add('tsukubai',.315,.395,1.1,2.2);
+  /* pasaderas cruzando el arroyo, alineadas con su curso real */
+  const cruce=(frac,n,sep)=>{
+   if(rp.length<9)return;
+   const bi=Math.max(4,Math.min(rp.length-5,Math.round(rp.length*frac)));
+   const a=rp[bi-4],c=rp[bi+4],m=rp[bi];
+   const dx=c[0]-a[0],dz=c[1]-a[1],L=Math.hypot(dx,dz)||1;
+   const px=-dz/L,pz=dx/L;
+   for(let q=-(n>>1);q<=(n>>1);q++)
+    add('losa',(m[0]+px*q*sep)/(N-1),(m[1]+pz*q*sep)/(N-1),.8+hash2(q*3,5)*.3);
+  };
+  cruce(.42,5,1.5);
+  cruce(.70,3,1.4);
+  /* pasaderas del sendero */
+  for(let q=0;q<6;q++)add('losa',.452+q*.009,.575+q*.019,.8+hash2(q,7)*.35);
+  /* puente arqueado sobre el arroyo, orientado a su curso */
+  if(rp.length>9){
+   const bi=Math.max(4,Math.min(rp.length-5,Math.round(rp.length*.86)));
+   const a=rp[bi-4],c=rp[bi+4],m=rp[bi];
+   const q=pu(m[0]/(N-1),m[1]/(N-1));
+   structuresPending.push({kind:'puente',x:q.x,z:q.z,ry:Math.atan2(-(c[0]-a[0]),-(c[1]-a[1]))});
+  }
+  /* rocas en grupos impares, al estilo karesansui, y borde del estanque */
+  const gr=[[.225,.285,1.5],[.245,.305,.85],[.205,.315,.7],
+   [.325,.245,1.25],[.345,.262,.8],
+   [.285,.375,1.1],[.302,.392,.7],
+   [.47,.70,1.2],[.575,.775,1.35],[.60,.70,.9],[.44,.755,1.0],[.50,.805,.75],
+   [.36,.545,.9],[.315,.505,.7],[.63,.44,.8]];
+  for(const r of gr)add('roca',r[0],r[1],r[2]);
+  /* faroles de piedra */
+  for(const f of [[.19,.485],[.335,.43],[.455,.645],[.585,.735],[.50,.815]])add('farol',f[0],f[1],1);
+  /* cerezos, pinos y bosquetes de bambú */
+  for(const c of [[.395,.79,1.25],[.625,.845,1.1],[.355,.60,1.0],[.60,.55,1.15]])add('cerezo',c[0],c[1],c[2]);
+  for(const c of [[.705,.275,1.0],[.245,.665,.85],[.665,.905,.9],[.145,.63,.8]])add('pino',c[0],c[1],c[2]);
+  for(let q=0;q<14;q++){const an=q*.62;add('bambu',.795+Math.cos(an)*.035,.485+Math.sin(an)*.05,.85+hash2(q,11)*.4)}
+  for(let q=0;q<8;q++){const an=q*.9;add('bambu',.185+Math.cos(an)*.032,.30+Math.sin(an)*.042,.8+hash2(q,17)*.35)}
+  /* arbustos podados junto al agua */
+  for(const c of [[.43,.66],[.575,.68],[.49,.755],[.62,.79],[.40,.70],[.335,.565],[.38,.50],[.55,.83]])
+   add('arbusto',c[0],c[1],.7+hash2(c[0]*13,c[1]*9)*.5);
+  for(const o of objects)if(o.type==='roca')rockBump(o.x,o.z,o.s*.55);
  }
  P.erosion=name!=='jardin';const t=document.getElementById('tEro');if(t)t.checked=P.erosion;
- if(typeof simStep==='function'){const wu=name==='jardin'?340:170;for(let q=0;q<wu;q++)simStep()}
+ if(typeof simStep==='function'){const wu=name==='jardin'?900:170;for(let q=0;q<wu;q++)simStep()}
  autoFlora(name);
  if(typeof onWorldRebuilt==='function')onWorldRebuilt();
 }
@@ -245,13 +381,14 @@ function autoFlora(name){
    const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
    if(sl>slMax)continue;
    if(water[k]>0.015||wet[k]>0.5)continue;
+   if(biome[k]===3||biome[k]===4)continue;
    objects.push({type:type,x:(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,z:(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL,s:s0+Math.random()*(s1-s0),ry:Math.random()*6.28});
    c++;
   }
  };
  if(name==='montana'){put('pino',150,3,26,.75,.8,1.5);put('roca',180,1,42,2,.28,.62);put('arbusto',70,2,20,.7,.6,1.1)}
  else if(name==='valle'){put('pino',170,3,32,.75,.8,1.5);put('roca',150,1,45,2,.28,.62);put('arbusto',80,2,24,.7,.6,1.1)}
- else{put('roca',60,.5,9,1.2,.22,.45);put('arbusto',30,1,8,.7,.5,.9)}
+ else{put('roca',26,.5,9,1.1,.2,.4);put('arbusto',48,1,9,.8,.45,.85);put('bambu',10,1,8,.5,.7,1.0)}
 }
 /* ================= ESCENA 3D ================= */
 let renderer,scene,camera,skyMesh,terrainMesh,waterMesh,foamPts,markerGroup,bottomMesh;
@@ -546,7 +683,7 @@ function fastNormals(pos,norAttr){
 }
 /* ---- colores del terreno (por franjas) ---- */
 const C_RK=[.42,.40,.38],C_SN=[.92,.94,.96],C_SA=[.50,.43,.29];
-const BIO=[[[.20,.42,.13],[.38,.50,.20]],[[.72,.62,.38],[.82,.74,.50]],[[.22,.47,.20],[.30,.53,.26]],[[.72,.75,.80],[.86,.88,.92]]];
+const BIO=[[[.20,.42,.13],[.38,.50,.20]],[[.72,.62,.38],[.82,.74,.50]],[[.22,.47,.20],[.30,.53,.26]],[[.72,.75,.80],[.86,.88,.92]],[[.60,.585,.53],[.73,.715,.655]]];
 function colorRows(j0,j1){
  for(let j=j0;j<j1;j++)for(let i=0;i<N;i++){const k=idx(i,j);
   const h=terrain[k];
@@ -778,6 +915,21 @@ function buildInstances(){
   {g:new THREE.IcosahedronGeometry(1.2,2),m:TM(0,.9,0,1,.75),c:[.22,.45,.18]},
   {g:new THREE.IcosahedronGeometry(.85,2),m:TM(.9,.7,.3,1,.7),c:[.26,.5,.2]},
   {g:new THREE.IcosahedronGeometry(.7,2),m:TM(-.7,.65,-.3,1,.7),c:[.2,.42,.16]}]);
+ defs.losa=mergeGeo([
+  {g:new THREE.CylinderGeometry(.8,.72,.22,10),m:TM(0,.11,0,1),c:[.56,.55,.52]},
+  {g:new THREE.CylinderGeometry(.55,.62,.14,9),m:TM(.12,.03,.06,1),c:[.48,.47,.45]}]);
+ defs.torii=mergeGeo([
+  {g:new THREE.CylinderGeometry(.20,.26,4.3,10),m:TM(-1.55,2.15,0,1),c:[.72,.19,.15]},
+  {g:new THREE.CylinderGeometry(.20,.26,4.3,10),m:TM(1.55,2.15,0,1),c:[.72,.19,.15]},
+  {g:new THREE.BoxGeometry(4.3,.30,.44),m:TM(0,3.35,0,1),c:[.68,.17,.13]},
+  {g:new THREE.BoxGeometry(5.1,.38,.58),m:TM(0,4.25,0,1),c:[.26,.15,.13]},
+  {g:new THREE.BoxGeometry(.30,.85,.36),m:TM(0,3.8,0,1),c:[.68,.17,.13]}]);
+ defs.tsukubai=mergeGeo([
+  {g:new THREE.CylinderGeometry(.62,.72,.66,12),m:TM(0,.33,0,1),c:[.5,.5,.47]},
+  {g:new THREE.CylinderGeometry(.46,.46,.14,12),m:TM(0,.68,0,1),c:[.30,.52,.60]},
+  {g:new THREE.CylinderGeometry(.09,.09,1.7,8),m:TM(-1.0,.85,0,1),c:[.70,.63,.33]},
+  {g:new THREE.CylinderGeometry(.07,.07,.95,8),m:TR(-.62,1.62,0,0,1.5708,1),c:[.74,.67,.36]},
+  {g:new THREE.IcosahedronGeometry(.42,1),m:TM(.95,.2,.35,1,.6),c:[.46,.45,.43]}]);
  inst={};
  const caps={pino:2600,roca:2600,cerezo:800,farol:800,bambu:800,arbusto:800};
  for(const t in defs){
@@ -870,7 +1022,7 @@ function scatterGrass(){
   const i=3+((Math.random()*(N-6))|0),j=3+((Math.random()*(N-6))|0),k=idx(i,j);
   const h=terrain[k];
   if(h<1.2||h>44)continue;
-  if(biome[k]===1||biome[k]===3)continue;
+  if(biome[k]===1||biome[k]===3||biome[k]===4)continue;
   const sl=Math.hypot(terrain[k+1]-terrain[k-1],terrain[k+N]-terrain[k-N])/(2*CELL);
   if(sl>0.85)continue;
   if(water[k]>0.02||wet[k]>0.45)continue;
@@ -1089,7 +1241,7 @@ function simStep(){
   const inF=(i>0?fR[k-1]:0)+(i<N-1?fL[k+1]:0)+(j>0?fB[k-N]:0)+(j<N-1?fT[k+N]:0);
   const outF=fL[k]+fR[k]+fT[k]+fB[k];
   let w=water[k]+dt*(inF-outF)/CA;
-  w*=hard[k]?0.99985:(biome[k]===1?0.9975:0.9993); /* acequias: casi sin evaporacion */
+  w*=hard[k]?0.99985:((biome[k]===1||biome[k]===4)?0.9975:0.9993); /* acequias: casi sin evaporacion */
   water[k]=w<1e-4?0:Math.min(w,30);
   const dm=Math.max(water[k],0.05);
   const dwx=((i>0?fR[k-1]:0)-fL[k]+fR[k]-(i<N-1?fL[k+1]:0))*.5;
@@ -1098,10 +1250,15 @@ function simStep(){
   spd[k]=Math.hypot(vX[k],vY[k]);
   wet[k]=Math.max(wet[k]*0.9965,Math.min(1,water[k]*2.5));
  }
+ /* difusion CONSERVATIVA: lo que sale de una celda siempre cae en una vecina.
+    Antes las celdas secas no recibian su parte y un arroyo fino perdia ~6% por paso. */
+ wTmp.fill(0);
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);
   const w=water[k];
-  if(w<1e-4){wTmp[k]=w;continue}
-  wTmp[k]=w*0.88+ (water[k-1]+water[k+1]+water[k-N]+water[k+N])*0.03;
+  if(w<1e-4){wTmp[k]+=w;continue}
+  wTmp[k]+=w*0.88;
+  const g=w*0.03;
+  wTmp[k-1]+=g;wTmp[k+1]+=g;wTmp[k-N]+=g;wTmp[k+N]+=g;
  }
  for(let j=1;j<N-1;j++)for(let i=1;i<N-1;i++){const k=idx(i,j);water[k]=wTmp[k]}
  eroTick++;
@@ -1321,7 +1478,7 @@ function hitTerrain(ev){
  const h=ray.intersectObject(terrainMesh);
  return h.length?h[0].point:null;
 }
-const CLICK_TOOLS={fuente:1,roca:1,pino:1,cerezo:1,bambu:1,arbusto:1,farol:1,puente:1,compuerta:1};
+const CLICK_TOOLS={fuente:1,roca:1,pino:1,cerezo:1,bambu:1,arbusto:1,farol:1,losa:1,torii:1,tsukubai:1,puente:1,compuerta:1};
 /* ---- herramienta canal: dibujar un trayecto y excavarlo descendente ---- */
 let canalPts=[],canalLine=null;
 function updateCanalLine(){
@@ -1336,6 +1493,12 @@ function updateCanalLine(){
  canalLine.geometry.setDrawRange(0,n);
  canalLine.geometry.attributes.position.needsUpdate=true;
  canalLine.visible=n>1;
+}
+function canalDims(){return {hw:clamp(P.brush*.24,.55,7),depth:.32+P.strength*4.1}}
+function showCanalSize(){
+ const d=canalDims(),e=document.getElementById('hint');
+ if(!e)return;
+ e.textContent='Canal: ancho '+(d.hw*2).toFixed(1)+' u, profundidad '+d.depth.toFixed(1)+' u. Baja Pincel e Intensidad al mínimo para un arroyo de jardín.'+(P.inherit?' Si nace en un cauce, hereda el tamaño de ese cauce.':'');
 }
 function commitCanal(){
  const pts=canalPts;canalPts=[];
@@ -1355,14 +1518,16 @@ function commitCanal(){
  }
  rs.push({x:pts[pts.length-1].x,z:pts[pts.length-1].z});
  /* v11.3: si el canal nace en (o desemboca en) un cauce existente, hereda su ancho y profundidad */
- let depth=1.8+P.strength*3.4;
- let hw=clamp(P.brush*.30,1.8,7);
+ const _cd=canalDims();
+ let depth=_cd.depth;
+ let hw=_cd.hw;
  const mA=P.inherit?measureChannelAt(rs[0].x,rs[0].z):null;
  const mB=(P.inherit&&!mA)?measureChannelAt(rs[rs.length-1].x,rs[rs.length-1].z):null;
  const linked=mA||mB;
  if(linked){depth=linked.depth;hw=linked.hw}
- const bw=Math.max(1.7,hw*.42);          /* muro de contencion */
- const R=hw+bw+2.4,slope=.055;
+ const bw=Math.max(.5,hw*.42);           /* muro de contencion, proporcional */
+ const R=hw+bw+Math.min(2.4,hw*.9+.5),slope=.055;
+ const coreMask=new Uint8Array(NN);
  const tH0=rs.map(q=>terrainHeightAt(q.x,q.z));
  /* acueductos: tramos del trazo que cruzan agua existente no se excavan, se puentean */
  const wet3=rs.map(q=>{
@@ -1435,8 +1600,10 @@ function commitCanal(){
    if(wk&&prot&&prot[k])continue; /* rio bajo acueducto: no se toca */
    if(d<hw){
     const tb=h+Math.pow(d/hw,1.9)*depth*.30;
-    terrain[k]=wk?Math.min(terrain[k],tb):tb;
-    hard[k]=1;
+    terrain[k]=(wk||coreMask[k])?Math.min(terrain[k],tb):tb;
+    hard[k]=1;coreMask[k]=1;
+   }else if(coreMask[k]){
+    /* el lecho ya excavado no se vuelve a levantar con el muro de otra muestra */
    }else if(d<hw+bw){
     if(!wk){terrain[k]=bankTop;hard[k]=1}
     else if(terrain[k]>bankTop){terrain[k]=bankTop;hard[k]=1}
@@ -1497,13 +1664,13 @@ function commitCanal(){
  let feed=false;
  for(const f of sources){if(Math.hypot(f.i-si,f.j-sj)*CELL<6){feed=true;break}}
  if(!feed&&si>3&&si<N-4&&sj>3&&sj<N-4){
-  sources.push({i:si,j:sj,rate:14});
+  sources.push({i:si,j:sj,rate:clamp(.8+hw*depth*1.6,.8,14)});
   rebuildMarkers();
   const prime=Math.min(rs.length,Math.round(18/step));
   for(let s2=0;s2<prime;s2++){
    const q2=rs[s2];
    const ii=Math.round((q2.x/WORLD+.5)*(N-1)),jj=Math.round((q2.z/WORLD+.5)*(N-1));
-   if(ii>0&&ii<N-1&&jj>0&&jj<N-1){const k2=jj*N+ii;water[k2]=Math.max(water[k2],1.0)}
+   if(ii>0&&ii<N-1&&jj>0&&jj<N-1){const k2=jj*N+ii;water[k2]=Math.max(water[k2],Math.min(1.0,depth*.5))}
   }
   hintEl.textContent='Canal excavado y manantial pequeño añadido en su inicio porque no había agua cerca. Quítalo con la herramienta Manantial si sobra.';
  } else hintEl.textContent='Canal excavado: siempre desciende, así el agua puede fluir.';
@@ -1543,7 +1710,7 @@ function measureChannelAt(x,z){
  if(fl<=0.05){const a2=walk(pz,-px),b2=walk(-pz,px);width=(width+(a2.n+b2.n+1)*CELL)/2}
  const eA=a.tEdge===null?terrain[k]:a.tEdge,eB=b.tEdge===null?terrain[k]:b.tEdge;
  const bank=Math.max(0,Math.max(eA,eB)-terrain[k]);
- return {hw:clamp(width/2,1.8,7),depth:clamp(bank+wmax*.6+.6,1.8,5.2),width:width,wmax:wmax,bank:bank};
+ return {hw:clamp(width/2,.55,7),depth:clamp(bank+wmax*.6+.35,.4,5.2),width:width,wmax:wmax,bank:bank};
 }
 const BRUSH_TOOLS={elevar:1,bajar:1,aplanar:1,suavizar:1,borrar:1,bioma:1};
 function onDown(ev){
@@ -1711,7 +1878,7 @@ function photoMode(){
  }
 }
 /* ================= UI ================= */
-const HINTS={mirar:'Arrastra para orbitar y usa la rueda para acercarte. También sirven los botones de cámara (abajo a la derecha), las flechas del teclado, + y -.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.',canal:'Dibuja una línea libre: al soltar se excava un canal que siempre desciende. Pincel = ancho, Intensidad = profundidad. Si activas \"Acueducto en cruces\", los cruces con ríos se puentean en vez de unirse.'};
+const HINTS={mirar:'Arrastra para orbitar y usa la rueda para acercarte. También sirven los botones de cámara (abajo a la derecha), las flechas del teclado, + y -.',elevar:'Mantén pulsado sobre el terreno para levantar montañas.',bajar:'Excava valles y cauces para guiar el agua.',aplanar:'Crea mesetas y terrazas planas.',suavizar:'Redondea y pule el relieve.',fuente:'Clic para crear un manantial. Clic sobre uno existente para quitarlo.',roca:'Coloca rocas que desvían y dividen la corriente.',pino:'Planta pinos.',cerezo:'Planta cerezos en flor.',bambu:'Planta cañas de bambú.',arbusto:'Planta arbustos.',farol:'Coloca faroles de piedra. De noche se encienden.',losa:'Coloca pasaderas de piedra para cruzar el agua a pie.',torii:'Coloca un portal torii, la entrada del jardín.',tsukubai:'Coloca un tsukubai, el lavabo de piedra con caña de bambú.',puente:'Coloca un puente. Se orienta solo para cruzar la corriente.',compuerta:'Coloca una compuerta que bloquea el agua. Clic sobre ella para abrirla o cerrarla.',bioma:'Pinta biomas con el pincel: elige el color abajo. La arena seca el agua más rápido.',borrar:'Arrastra para quitar objetos, manantiales, puentes y compuertas.',canal:'Dibuja una línea libre: al soltar se excava un canal que siempre desciende. Pincel = ancho, Intensidad = profundidad. Si activas \"Acueducto en cruces\", los cruces con ríos se puentean en vez de unirse.'};
 let dayTime=100/240;
 function applyDayTime(){
  const th=(dayTime-.25)*6.28318;
@@ -1739,16 +1906,16 @@ function bindUI(){
  const $=id=>document.getElementById(id);
  document.querySelectorAll('.tools button').forEach(b=>b.addEventListener('click',()=>{
   document.querySelectorAll('.tools button').forEach(x=>x.classList.remove('sel'));
-  b.classList.add('sel');P.tool=b.dataset.t;$('hint').textContent=HINTS[P.tool];
+  b.classList.add('sel');P.tool=b.dataset.t;$('hint').textContent=HINTS[P.tool];if(P.tool==='canal')showCanalSize();
  }));
  document.querySelectorAll('.presets button').forEach(b=>b.addEventListener('click',()=>{
   document.querySelectorAll('.presets button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');undoStack=[];applyPreset(b.dataset.p);
-  if(b.dataset.p==='jardin'){camG.rad=140;camG.ph=.8}else{camG.rad=230;camG.ph=1.02}
+  if(b.dataset.p==='jardin'){camG.rad=105;camG.ph=.78}else{camG.rad=230;camG.ph=1.02}
   camG.tx=0;camG.tz=0;camG.ty=14;
  }));
- $('sBrush').addEventListener('input',e=>{P.brush=+e.target.value;$('vBrush').textContent=e.target.value});
- $('sStr').addEventListener('input',e=>{P.strength=+e.target.value/100;$('vStr').textContent=e.target.value});
+ $('sBrush').addEventListener('input',e=>{P.brush=+e.target.value;$('vBrush').textContent=e.target.value;if(P.tool==='canal')showCanalSize()});
+ $('sStr').addEventListener('input',e=>{P.strength=+e.target.value/100;$('vStr').textContent=e.target.value;if(P.tool==='canal')showCanalSize()});
  $('sFlow').addEventListener('input',e=>{P.flow=+e.target.value/100;$('vFlow').textContent='x'+P.flow.toFixed(1)});
  $('sSpeed').addEventListener('input',e=>{P.speed=+e.target.value/10;$('vSpeed').textContent=P.speed.toFixed(1)});
  $('tEro').addEventListener('change',e=>P.erosion=e.target.checked);
