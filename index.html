@@ -93,6 +93,7 @@
  <label class="tg"><input id="tRain" type="checkbox"/> Lluvia</label>
  <label class="tg"><input id="tSnd" type="checkbox"/> Sonido de agua</label>
  <label class="tg"><input id="tDuct" type="checkbox"/> Acueducto en cruces del canal</label>
+ <label class="tg"><input id="tInh" type="checkbox" checked/> Heredar tamaño del cauce conectado</label>
  <div class="sec">Ambiente</div>
  <div class="sl"><label>Hora</label><input id="sHour" type="range" min="0" max="239" step="1" value="100"/><b id="vHour">10h</b></div>
  <label class="tg"><input id="tCycle" type="checkbox"/> Ciclo día y noche</label>
@@ -138,7 +139,7 @@ const vX=new Float32Array(NN), vY=new Float32Array(NN), wet=new Float32Array(NN)
 const biome=new Uint8Array(NN);
 const hard=new Uint8Array(NN); /* celdas de canal: no erosionan ni se derrumban */
 let sources=[], objects=[], structures=[], structuresPending=[], ducts=[], currentPreset='montana', terrainDirty=false;
-const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true, aqueduct:false};
+const P={tool:'mirar', brush:14, strength:0.55, flow:1, speed:1, erosion:true, rain:false, sound:false, paused:false, biome:0, cycle:false, quality:2, autoQ:true, aqueduct:false, inherit:true};
 const idx=(i,j)=>j*N+i;
 const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
 /* ---- ruido ---- */
@@ -1356,8 +1357,8 @@ function commitCanal(){
  /* v11.3: si el canal nace en (o desemboca en) un cauce existente, hereda su ancho y profundidad */
  let depth=1.8+P.strength*3.4;
  let hw=clamp(P.brush*.30,1.8,7);
- const mA=measureChannelAt(rs[0].x,rs[0].z);
- const mB=mA?null:measureChannelAt(rs[rs.length-1].x,rs[rs.length-1].z);
+ const mA=P.inherit?measureChannelAt(rs[0].x,rs[0].z):null;
+ const mB=(P.inherit&&!mA)?measureChannelAt(rs[rs.length-1].x,rs[rs.length-1].z):null;
  const linked=mA||mB;
  if(linked){depth=linked.depth;hw=linked.hw}
  const bw=Math.max(1.7,hw*.42);          /* muro de contencion */
@@ -1760,6 +1761,7 @@ function bindUI(){
  }));
  $('tSnd').addEventListener('change',e=>{P.sound=e.target.checked;if(P.sound)audioOn();else audioOff()});
  $('tDuct').addEventListener('change',e=>P.aqueduct=e.target.checked);
+ $('tInh').addEventListener('change',e=>P.inherit=e.target.checked);
  $('bReset').addEventListener('click',()=>{undoStack=[];applyPreset(currentPreset)});
  $('bDry').addEventListener('click',()=>{water.fill(0);fL.fill(0);fR.fill(0);fT.fill(0);fB.fill(0);sed.fill(0);spd.fill(0)});
  $('bPause').addEventListener('click',()=>{P.paused=!P.paused;$('bPause').textContent=P.paused?'▶':'⏸'});
