@@ -2,7 +2,7 @@ name: apply-v12
 on:
   push:
     paths:
-      - '.v12/patch.b64'
+      - '.v12/GO'
 permissions:
   contents: write
 jobs:
@@ -12,9 +12,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Aplicar splice verificando sha256 de entrada y salida
         run: |
+          cat .v12/c*.txt | tr -d '\n' > /tmp/patch.b64
           python3 - <<'PY'
           import base64, zlib, json, hashlib
-          p = json.loads(zlib.decompress(base64.b64decode(open('.v12/patch.b64').read().strip())).decode('utf-8'))
+          p = json.loads(zlib.decompress(base64.b64decode(open('/tmp/patch.b64').read().strip())).decode('utf-8'))
           old = open('index.html', encoding='utf-8').read()
           hin = hashlib.sha256(old.encode()).hexdigest()
           assert hin == p['in'], ('entrada', hin)
