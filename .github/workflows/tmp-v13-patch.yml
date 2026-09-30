@@ -1,0 +1,23 @@
+name: tmp-v13-patch
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/tmp-v13-patch.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar parche v13 con verificacion sha256
+        run: python3 tools/tmp_v13_patch.py d6231a763dbb2da7b1864fe643690585599d07c8a0f1eb67a07fe0a8f8f305aa d9327bc019fd6909056e99c8e93f81d9b35fa678498e8f371900ac6a9e2b7723 a81b0e32797834aa69307516b7f94c75d217459dd74cd0e56db1c6a115ae2e27
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q tools/tmp_v13_patch.py
+          git add index.html CLAUDE.md README.md
+          git commit -m "v13: boton Jardin 8-bit en el juego 3D, CLAUDE.md y README actualizados"
+          git push
