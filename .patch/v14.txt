@@ -1,0 +1,263 @@
+### index.html d6231a763dbb2da7b1864fe643690585599d07c8a0f1eb67a07fe0a8f8f305aa 26360f112d8154470eb8f252dee271b6128c86773e013ff68cf5836957a0b1e9
+@@ 60 61 1
+ <a id="b8bit" href="8bit/index.html" title="Lanza barquitos de papel por los arroyos del jardin">🕹️ Jardín 8-bit · barquitos</a>
+@@ 112 112 1
+ <label class="tg" title="Iluminación lineal con tone mapping ACES (Three.js r186). Recarga la página y conserva tu mundo."><input id="tFis" type="checkbox"/> Luz física (beta)</label>
+@@ 128 129 1
+<div id="stats"><span id="stFps">-- fps</span><br/><span id="stVol">agua: 0</span><br/><span id="stQ">calidad: alta</span><br/><span id="stVer" style="opacity:.6">three r186</span></div>
+@@ 136 139 15
+<script type="module">
+/* v14: Three.js r186 como modulo ES (antes r128 global). Los modulos ya son estrictos. */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js';
+/* Color: por defecto el aspecto clasico (identico a r128). ?color=fisico (boton "Luz fisica") = flujo lineal HDR con ACES, en beta. */
+const LIN=/[?&]color=fisico/i.test(location.search);
+THREE.ColorManagement.enabled=LIN;
+const LI=x=>LIN?Math.pow(Math.max(x,0),2.2):x;
+const EXPL=.64,SATL=1.0,NBL=3,NKL=3;/* lineal: exposicion de dia, saturacion, relleno al anochecer y adaptacion nocturna (calibrados contra r128) */
+/* la niebla se sigue mezclando en espacio de pantalla, como en r128 (en lineal velaba y desaturaba el paisaje) */
+if(LIN){const FM='gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );';
+ if(THREE.ShaderChunk.fog_fragment.includes(FM))THREE.ShaderChunk.fog_fragment=THREE.ShaderChunk.fog_fragment.replace(FM,
+  'gl_FragColor.rgb = sRGBTransferEOTF( vec4( mix( sRGBTransferOETF( vec4( gl_FragColor.rgb, 1. ) ).rgb, sRGBTransferOETF( vec4( fogColor, 1. ) ).rgb, fogFactor ), 1. ) ).rgb;');}
+const GLSLC=LIN?
+ 'vec3 toLin(vec3 c){c=max(c,0.);return mix(c/12.92,pow((c+.055)/1.055,vec3(2.4)),step(.04045,c));}\nvec3 toDisp(vec3 c){c=max(c,0.);return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c));}\n':
+ 'vec3 toLin(vec3 c){return c;}\nvec3 toDisp(vec3 c){return c;}\n';
+@@ 150 150 1
+const smoothstep01=x=>{x=clamp(x,0,1);return x*x*(3-2*x)};
+@@ 412 412 35
+/* v14: textura procedural del agua (sin archivos): RG = normales de olas periodicas, B y A = fbm periodico para vetas y espuma */
+function makeWaterTex(){
+ const S=256,data=new Uint8Array(S*S*4);
+ let sd=987654321;const rnd=()=>{sd=(Math.imul(sd,1664525)+1013904223)>>>0;return sd/4294967296};
+ const WV=[];
+ for(let q=0;q<48;q++){
+  const a=rnd()*6.2832,kr=3+Math.pow(rnd(),1.7)*40;
+  let kx=Math.round(Math.cos(a)*kr),ky=Math.round(Math.sin(a)*kr);
+  if(!kx&&!ky)kx=3;
+  WV.push({kx:kx,ky:ky,amp:Math.pow(Math.hypot(kx,ky),-1.5)*(.6+.8*rnd()),ph:rnd()*6.2832});
+ }
+ const gx=new Float32Array(S*S),gy=new Float32Array(S*S);let ss=0;
+ const cs=new Float32Array(S);
+ for(const w of WV){
+  for(let x=0;x<S;x++)cs[x]=w.kx*x;
+  const A=w.amp*6.2832;
+  for(let y=0;y<S;y++){const by=w.ky*y;for(let x=0;x<S;x++){const c=Math.cos(6.2832*(cs[x]+by)/S+w.ph)*A,k=y*S+x;gx[k]+=c*w.kx;gy[k]+=c*w.ky}}
+ }
+ for(let k=0;k<S*S;k++)ss+=gx[k]*gx[k]+gy[k]*gy[k];
+ const sc=.40/Math.sqrt(ss/(S*S*2));
+ const lat=new Float32Array(2*128*128);for(let q=0;q<lat.length;q++)lat[q]=rnd();
+ const pvn=(x,y,P,o)=>{const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+  const i0=xi%P,j0=yi%P,i1=(xi+1)%P,j1=(yi+1)%P;
+  const a=lat[o+j0*128+i0],b=lat[o+j0*128+i1],c=lat[o+j1*128+i0],d=lat[o+j1*128+i1];
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v};
+ const pfbm=(x,y,o)=>{let s=0,a=.5,n=0;for(let P=16;P<=128;P*=2){s+=a*pvn(x*P/S,y*P/S,P,o);n+=a;a*=.5}return s/n};
+ for(let y=0;y<S;y++)for(let x=0;x<S;x++){const k=y*S+x,k4=k*4;
+  data[k4]=clamp(128+gx[k]*sc*127,0,255);data[k4+1]=clamp(128+gy[k]*sc*127,0,255);
+  data[k4+2]=clamp(pfbm(x,y,0)*255,0,255);data[k4+3]=clamp(pfbm(x+37,y+71,16384)*255,0,255);
+ }
+ const t=new THREE.DataTexture(data,S,S,THREE.RGBAFormat);
+ t.wrapS=t.wrapT=THREE.RepeatWrapping;t.magFilter=THREE.LinearFilter;t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;
+ t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());t.needsUpdate=true;
+ return t;
+}
+@@ 417 418 2
+ renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;/* r186: PCFSoft ya no existe, PCF usa profundidad nativa + disco de Vogel */
+ renderer.outputColorSpace=LIN?THREE.SRGBColorSpace:THREE.LinearSRGBColorSpace;
+@@ 424 425 1
+  fragmentShader:'varying vec3 vw;uniform vec3 sunDir;uniform float uNight;uniform float uWarm;uniform vec3 uMoon;\n'+GLSLC+
+@@ 440 441 1
+   'gl_FragColor=vec4(toLin(c),1.);}'}));
+@@ 449 449 1
+ sun.shadow.radius=2.6;/* r186: radio en texeles del PCF; ~2.6 iguala la suavidad del PCFSoft de r128 y promedia el tramado de la sombra del agua */
+@@ 467 468 1
+   .replace('#include <common>','#include <common>\nvarying vec3 vWP;\nuniform sampler2D tFlow;\nuniform float uTime;\nuniform float uCaus;\n'+GLSLN+GLSLC)
+@@ 478 479 1
+    '}\ndiffuseColor.rgb=toLin(diffuseColor.rgb);}');
+@@ 509 510 1
+ const rtp={minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,format:THREE.RGBAFormat,colorSpace:LIN?THREE.SRGBColorSpace:THREE.NoColorSpace};
+@@ 515 516 1
+  uniforms:{uT:{value:0},sunDir:{value:SUNDIR},fogC:{value:new THREE.Color(0xa7c6de)},fogD:{value:0.0009},uRefl:{value:reflRT.texture},uRefr:{value:refrRT.texture},uTexMat:{value:texMat},uLevel:{value:0},uReflOn:{value:1},tSurf:{value:texSurf},tFlow:{value:texFlow},tNrm:{value:makeWaterTex()},uDay:{value:1}},
+@@ 547 548 1
+  fragmentShader:'uniform float uT;uniform vec3 sunDir;uniform vec3 fogC;uniform float fogD;uniform sampler2D uRefl;uniform sampler2D uRefr;uniform float uLevel;uniform float uReflOn;uniform sampler2D tFlow;uniform sampler2D tNrm;uniform float uDay;\n'+GLSLC+
+@@ 550 553 2
+   /* v14: mapa de normales en capas (tecnica del addon Water de three.js) en vez de ruido por pixel */
+   'vec2 nrm(vec2 p){return texture2D(tNrm,p).rg*2.-1.;}\n'+
+@@ 555 555 1
+   'vec3 fogP=toDisp(fogC);\n'+
+@@ 558 559 2
+   'float dl=length(dirRaw);\n'+
+   'vec2 dir=dl>.06?dirRaw/dl:vec2(0.,1.);\n'+
+@@ 560 560 4
+   'vec3 gN=normalize(vN);\n'+
+   /* cascada: lamina empinada que cae en el sentido de la corriente (las orillas no cuentan) */
+   'vec2 fd=dot(gN.xz,gN.xz)>1e-5?normalize(gN.xz):dir;\n'+
+   'float casc=smoothstep(.88,.62,gN.y)*smoothstep(.03,.12,dep)*smoothstep(.25,.7,dot(fd,dir))*smoothstep(.4,1.8,vS);\n'+
+@@ 566 570 13
+   /* corriente: dos fases advectadas por el flujo; quieta: ondas de viento a la deriva en 3 escalas */
+   'vec2 pf=mix(nrm(uv1*.21)+nrm(uv1*.53+.37)*.6,nrm(uv2*.21)+nrm(uv2*.53+.37)*.6,blend);\n'+
+   'vec2 pw=nrm(vW.xz*.047+uT*vec2(.011,.008))+nrm(vW.xz*.083-uT*vec2(.006,-.010))*.8+nrm(vW.xz*.19+uT*vec2(-.017,.013))*.5;\n'+
+   'vec2 pert=mix(pw*.62,pf,smoothstep(.15,1.2,vS));\n'+
+   'float e=.10+.22*spN;\n'+
+   'vec3 n=normalize(vec3(gN.x+e*pert.x,max(gN.y,.35),gN.z+e*pert.y));\n'+
+   /* vetas de la cascada: ruido estirado en la caida que baja rapido */
+   'vec2 fp=vec2(-fd.y,fd.x);\n'+
+   'vec2 cuv=vec2(dot(vW.xz,fp)*.24,-vW.y*.13-uT*1.6);\n'+
+   'vec4 cs=texture2D(tNrm,cuv*vec2(1.,.22));\n'+
+   'vec4 cs2=texture2D(tNrm,cuv*vec2(2.6,.45)+vec2(.41,.13)-vec2(0.,uT*.5));\n'+
+   'float streak=smoothstep(.50,.86,cs.b*.62+cs2.a*.58);\n'+
+   'n=normalize(n+casc*vec3(fp.x,0.,fp.y)*(cs.r-.5)*1.1);\n'+
+@@ 575 576 1
+   'vec3 refrC=toDisp(texture2D(uRefr,clamp(suv+rof,vec2(.002),vec2(.998))).rgb);\n'+
+@@ 580 581 2
+   'float ndl=max(dot(n,sunDir),0.);\n'+
+   'float dif=.64+.36*ndl;\n'+
+@@ 582 582 1
+   'col=mix(col,mix(refrC*vec3(.52,.72,.78),vec3(.17,.42,.50),.6)*(.78+.32*ndl),casc*.82);\n'+
+@@ 584 585 1
+   'vec3 refC=toDisp(texture2DProj(uRefl,rc).rgb);\n'+
+@@ 586 592 8
+   'refC=mix(fogP*1.05,refC,rok);\n'+
+   'refC=mix(refC,fogP*1.02,clamp(spN*.62,0.,.72));\n'+
+   'col=mix(col,refC,fr*mix(.88,.42,spN)*(1.-casc*.75));\n'+
+   /* sol: lobulo ancho + destellos finos sobre las ondas (solo de dia) */
+   'float rv=max(dot(reflect(-sunDir,n),V),0.);\n'+
+   'float spq=pow(rv,mix(240.,48.,spN))*.9+pow(rv,1600.)*2.6*(1.-spN);\n'+
+   'col+=vec3(1.,.98,.9)*spq*uDay;\n'+
+   'float foamN=mix(texture2D(tNrm,uv1*.41+.11).a,texture2D(tNrm,uv2*.41+.11).a,blend);\n'+
+@@ 594 594 2
+   /* agua blanca de la cascada */
+   'foamA=max(foamA,casc*(.10+.90*streak));\n'+
+@@ 595 596 1
+   'col=mix(col,vec3(.96,.98,1.)*(.82+.18*ndl),foamA*.85);\n'+
+@@ 598 599 1
+   'col=mix(col,fogP,fg);\n'+
+@@ 601 601 1
+   'a=max(a,casc*(.66+.30*streak));\n'+
+@@ 602 603 1
+   'gl_FragColor=vec4(toLin(col),a);}'}));
+@@ 637 639 2
+  vertexShader:'attribute float aA;attribute float aS;varying float vA;varying float vM;void main(){vA=aA;vM=step(3.,aS);vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(aS*170./max(-mv.z,1.),1.2,mix(18.,96.,vM));gl_Position=projectionMatrix*mv;}',
+  fragmentShader:'varying float vA;varying float vM;void main(){vec2 q=gl_PointCoord-.5;float r=length(q);float a=mix(smoothstep(.5,.15,r),smoothstep(.5,0.,r)*smoothstep(.5,0.,r)*.7,vM)*vA;gl_FragColor=vec4(1.,1.,1.,a*.8);}'}));
+@@ 644 644 6
+/* colores de vertice escritos en sRGB (como en r128): pasarlos a lineal en el shader */
+function linVC(m){
+ if(!LIN)return m;
+ m.onBeforeCompile=sh=>{sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\n'+GLSLC).replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=toLin(diffuseColor.rgb);')};
+ return m;
+}
+@@ 645 646 1
+ const mat=linVC(new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));
+@@ 768 771 6
+ /* lineal: escena en coma flotante (HDR) y tone mapping ACES sobre valores lineales, como un render fisico */
+ const ext=renderer.extensions,fOK=ext.has('EXT_color_buffer_float')||ext.has('EXT_color_buffer_half_float');
+ const hdr=LIN?(fOK?{type:THREE.HalfFloatType}:{colorSpace:THREE.SRGBColorSpace}):{};/* sin float renderizable: 8 bits sRGB */
+ sceneRT=new THREE.WebGLRenderTarget(w,h,Object.assign({},rtp,hdr));
+ bloomA=new THREE.WebGLRenderTarget(Math.max(2,w>>2),Math.max(2,h>>2),Object.assign({},rtp,hdr));
+ bloomB=new THREE.WebGLRenderTarget(Math.max(2,w>>2),Math.max(2,h>>2),Object.assign({},rtp,hdr));
+@@ 774 776 3
+ const PD=LIN?{LINPIPE:1}:{};
+ matBright=new THREE.ShaderMaterial({defines:PD,uniforms:{tD:{value:null},uTh:{value:LIN?.80:.86}},vertexShader:VS,
+  fragmentShader:'uniform sampler2D tD;uniform float uTh;varying vec2 vU;\n'+GLSLC+'void main(){vec3 c=texture2D(tD,vU).rgb;float l=dot(c,vec3(.2126,.7152,.0722));\n#ifdef LINPIPE\ngl_FragColor=vec4(c*smoothstep(uTh,uTh+.6,l),1.);\n#else\ngl_FragColor=vec4(c*smoothstep(uTh,uTh+.20,l),1.);\n#endif\n}'});
+@@ 782 784 2
+ matComp=new THREE.ShaderMaterial({defines:PD,uniforms:{tD:{value:null},tB:{value:null},uStr:{value:.40},uExp:{value:.97},uSat:{value:LIN?SATL:1.16}},vertexShader:VS,
+  fragmentShader:'uniform sampler2D tD;uniform sampler2D tB;uniform float uStr;uniform float uExp;uniform float uSat;varying vec2 vU;\n'+GLSLC+
+@@ 787 788 2
+   'c=clamp(mix(vec3(dot(c,vec3(.2126,.7152,.0722))),c,uSat),0.,1.);\n'+
+   '#ifdef LINPIPE\nc=toDisp(c);\n#endif\n'+
+@@ 889 890 1
+ objMat=linVC(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));
+@@ 938 939 1
+  im.count=0;im.castShadow=true;im.receiveShadow=true;im.frustumCulled=false;
+@@ 947 949 2
+ grassMesh=new THREE.InstancedMesh(grassGeo,linVC(new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})),5200);
+ grassMesh.count=0;grassMesh.receiveShadow=true;grassMesh.frustumCulled=false;
+@@ 952 953 1
+ lampMesh.count=0;lampMesh.frustumCulled=false;
+@@ 960 961 1
+ fishMesh.count=0;fishMesh.frustumCulled=false;
+@@ 1307 1308 1
+function spawnFoam(x,y,z,vx,vy,vz,ml,size,g){
+@@ 1309 1310 12
+ foam.push({x:x,y:y,z:z,vx:vx,vy:vy,vz:vz,l:0,ml:ml,sz:size,g:g===undefined?13:g});
+}
+/* v14: bruma de cascada. Se buscan las celdas al pie de cada salto (cada 30 frames) y de ahi sale la bruma */
+let cascCells=[],mistN=0;
+function scanCascades(){
+ cascCells=[];
+ for(let j=2;j<N-2;j++)for(let i=2;i<N-2;i++){const k=j*N+i,d=water[k];if(d<0.05)continue;
+  const hh=terrain[k]+d;let drop=0,q;
+  q=k-1;if(water[q]>0.03)drop=Math.max(drop,terrain[q]+water[q]-hh);q=k+1;if(water[q]>0.03)drop=Math.max(drop,terrain[q]+water[q]-hh);
+  q=k-N;if(water[q]>0.03)drop=Math.max(drop,terrain[q]+water[q]-hh);q=k+N;if(water[q]>0.03)drop=Math.max(drop,terrain[q]+water[q]-hh);
+  if(drop>1.6&&cascCells.length<600)cascCells.push(k,drop);
+ }
+@@ 1312 1312 9
+ if(frame%30===0)scanCascades();
+ const nc=cascCells.length>>1,mMax=Math.round(260*QS[P.quality].foam);
+ for(let m=0;m<3&&nc&&mistN<mMax&&foam.length<MAXFOAM-6;m++){
+  if(Math.random()>QS[P.quality].foam)continue;
+  const c=(Math.random()*nc)|0,k=cascCells[c*2],drop=cascCells[c*2+1];
+  if(water[k]<0.05)continue;
+  const i=k%N,j=(k/N)|0,x=(i/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL*1.6,z=(j/(N-1)-.5)*WORLD+(Math.random()-.5)*CELL*1.6;
+  spawnFoam(x,terrain[k]+water[k]+.3,z,(Math.random()-.5)*.4+vX[k]*.06,.15+Math.random()*.35,(Math.random()-.5)*.4+vY[k]*.06,1.6+Math.random()*1.5,4.6+Math.min(drop,10)*.55,.8);
+ }
+@@ 1349 1350 1
+  f.vy-=f.g*dt;f.x+=f.vx*dt*3;f.y+=f.vy*dt*3;f.z+=f.vz*dt*3;
+@@ 1353 1353 1
+ mistN=0;
+@@ 1354 1355 1
+  if(q<foam.length){const f=foam[q];fPos[q*3]=f.x;fPos[q*3+1]=f.y;fPos[q*3+2]=f.z;if(f.sz>=3){fAlp[q]=Math.sin(Math.PI*f.l/f.ml)*.8;mistN++}else fAlp[q]=1-f.l/f.ml;fSize[q]=f.sz||1}
+@@ 1891 1895 8
+ /* r186: luces fisicas (x PI = brillo de r128). En lineal se recalibran para que sol pleno y sombra
+    den el mismo brillo que antes y los medios tonos sigan la caida fisica (mas suave y natural). */
+ const sB=.05+1.05*dayF,hB=.10+.46*dayF,mB=.20*(1-dayF);
+ sun.intensity=(LIN?LI(sB+hB)-LI(hB):sB)*Math.PI;
+ sun.color.setRGB(1,.96-.34*warm,.88-.55*warm,THREE.SRGBColorSpace);
+ const NB=LIN?1+NBL*(1-dayF):1;/* de noche la luz de relleno sube en lineal: el pie de ACES aplastaba la escena */
+ hemi.intensity=LI(hB)*NB*Math.PI;
+ moon.intensity=(LIN?LI(mB+hB)-LI(hB):mB)*NB*Math.PI;
+@@ 1896 1898 2
+ scene.fog.color.setRGB(r,g,b,THREE.SRGBColorSpace);
+ waterMesh.material.uniforms.fogC.value.setRGB(r,g,b,THREE.SRGBColorSpace);
+@@ 1904 1905 2
+ waterMesh.material.uniforms.uDay.value=dayF;
+ if(matComp)matComp.uniforms.uExp.value=LIN?EXPL*(1+NKL*(1-smoothstep01(dayF/.16))):.97+(1-dayF)*.40;/* lineal: pasado el ocaso la exposicion se adapta como una camara */
+@@ 1958 1958 7
+ $('tFis').checked=LIN;
+ $('tFis').addEventListener('change',e=>{
+  try{localStorage.setItem('nacimiento_v2',serializeGame());sessionStorage.setItem('nac_restore',String(dayTime))}catch(er){}
+  const u=new URL(location.href);
+  if(e.target.checked)u.searchParams.set('color','fisico');else u.searchParams.delete('color');
+  location.href=u.toString();
+ });
+@@ 2029 2029 8
+/* al cambiar el modo de luz se recarga: recuperar el mundo y la hora */
+try{const rh=sessionStorage.getItem('nac_restore');if(rh!==null){sessionStorage.removeItem('nac_restore');const sv=localStorage.getItem('nacimiento_v2');
+ if(sv&&restoreGame(JSON.parse(sv)))document.getElementById('hint').textContent=LIN?'Luz física activada. Tu mundo se mantiene.':'Luz clásica activada. Tu mundo se mantiene.';
+ dayTime=+rh||dayTime;document.getElementById('sHour').value=Math.round(dayTime*240);document.getElementById('vHour').textContent=Math.floor(dayTime*24)+'h';applyDayTime()}}catch(e){}
+document.getElementById('stVer').textContent='three r'+THREE.REVISION+(LIN?' · luz física':'');
+/* ganchos para pruebas automaticas (solo con ?debug) */
+if(/[?&]debug/.test(location.search))window.__nac={camG,cam,P,water,terrain,spd,wet,vX,vY,get sources(){return sources},get objects(){return objects},applyPreset,onWorldRebuilt,setQuality,camHome,photoMode,renderFrame,simStep,terrainHeightAt,
+ setHour:h=>{dayTime=h/24;applyDayTime()},get frame(){return frame},get foamN(){return foam.length},renderer,scene,THREE,LIN,sun,hemi,moon,get sceneRT(){return sceneRT},matComp};
+### CLAUDE.md d9327bc019fd6909056e99c8e93f81d9b35fa678498e8f371900ac6a9e2b7723 0496c906033d13ac7715dab51d060cda20e5978c63a2fee7b51982f38cddfd1d
+@@ 8 9 13
+## Estado actual: v14 en la rama `upgrade-threejs` (2026-10-07). `main` y GitHub Pages siguen en v13
+
+- v14 (pedido de Jaime: "is this useful for this project? github.com/mrdoob/three.js" y luego "haz esto" = migrar el 3D a la ultima version en una rama con staging propio + mejorar el agua de las cascadas):
+  - Three.js r128 -> r186 (0.186.1) como modulo ES: `<script type="module">` con `import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js'` (r160+ ya no trae build global). Los modulos son estrictos y su scope no es global: para pruebas automaticas hay ganchos en `window.__nac` SOLO con `?debug`.
+  - Cambios de API resueltos: `PCFSoftShadowMap` ya no existe (r186 avisa y usa PCF con textura de profundidad nativa + disco de Vogel; `sun.shadow.radius=2.6` iguala la suavidad y promedia el tramado de la sombra del agua). Luces fisicas desde r155: intensidades x PI para el mismo brillo. `InstancedMesh` desde r151 cachea su esfera envolvente: calculada con count=0 en el primer render quedaba vacia y recortaba peces y objetos nuevos, por eso todas las instancias llevan `frustumCulled=false` (de paso arregla un bug latente de r128: al alejar el centro del mapa de la vista desaparecian arboles y rocas). Niebla y sol usan `setRGB(...,THREE.SRGBColorSpace)`.
+  - Color: por defecto `ColorManagement.enabled=false` y salida lineal = aspecto r128 identico (MAE 0.4-2.7 sobre 255 en 7 escenas contra r128, misma fisica: volumen de agua identico al decimal). Casilla "Luz fisica (beta)" (`#tFis`, = `?color=fisico`; recarga y conserva el mundo y la hora via localStorage 'nacimiento_v2' + sessionStorage 'nac_restore'): flujo lineal HDR (sceneRT y bloom HalfFloat, RT de agua sRGB), colores de vertice a lineal en el shader (`linVC`), niebla mezclada en espacio de pantalla (override de `ShaderChunk.fog_fragment`; en lineal velaba y desaturaba todo), ACES sobre lineal + OETF, EXPL .64, saturacion 1.0, relleno al anochecer NBL 3 y adaptacion nocturna NKL 3. De dia mas vivo y con roca calida; al atardecer algo mas oscuro que r128. Shaders propios: `GLSLC` define toLin/toDisp (identidad en clasico), el agua calcula en espacio de pantalla como antes y convierte al final.
+  - Agua: textura procedural `makeWaterTex()` 256x256 sin archivos (RG = normales de 48 olas periodicas, B y A = fbm periodico) en vez de 6 fbm por pixel (mas barato). Tecnica del addon Water de three.js: normales en 3 capas que derivan con el viento en agua quieta + las dos fases advectadas por el flujo en corriente. El addon Water tal cual NO sirve aqui: es un plano espejo y no sigue la superficie simulada (malla GPU desplazada). Destellos de sol nitidos (pow 1600) solo de dia (`uDay`).
+  - Cascadas: `casc` = pendiente de la superficie (gN.y<.88) x profundidad x alineacion de la caida con la corriente (asi las orillas no cuentan) x velocidad. Lamina turquesa translucida + vetas blancas estiradas en la caida que bajan a ~12 u/s, menos reflejo y mas opacidad. Bruma: `scanCascades()` cada 30 frames guarda las celdas al pie de cada salto (drop>1.6) y de ahi salen particulas grandes y lentas (tamano>=3 en el shader de puntos = bruma suave, gravedad .8, alfa en seno). El muestreo aleatorio original casi nunca caia en la base de una cascada.
+  - Boton 8-bit apunta a `8bit/index.html` (asi funciona tambien en raw.githack).
+  - Staging de la rama: https://raw.githack.com/guachiman19/juego-agua/upgrade-threejs/index.html (githack sirve la rama con text/html, cache de unos minutos). Comparar con el staging v13: https://guachiman19.github.io/juego-agua/
+  - Pruebas: arnes Playwright determinista (RAF manual + Math.random con semilla + CDN servido desde node_modules con page.route); calentamiento con `simStep()` directo sin render (en SwiftShader un frame de 960x600 cuesta ~2 s; r186 sale +11% vs r128 ahi, por las lecturas de textura en CPU; en GPU real hay que medir con el contador de fps). Escenas: montana, montana_tarde, jardin, jardin_noche, valle, acantilado (terreno con meseta y acantilado de 16u armado en el arnes) y montana_rio.
+
+## Historial v13 (2026-09-30)
+@@ 73 74 1
+- Repo: `guachiman19/juego-agua` (main = v13; rama `upgrade-threejs` = v14 con Three.js r186). Staging: GitHub Pages https://guachiman19.github.io/juego-agua/ (3D) y https://guachiman19.github.io/juego-agua/8bit/ (8-bit), v13; la rama v14 en https://raw.githack.com/guachiman19/juego-agua/upgrade-threejs/index.html . Producción: NO desplegada, requiere OK de Jaime. Vercel sin conexión.
+@@ 84 85 1
+- Render (v14, Three.js r186 modulo ES): terreno con fastNormals + detalle por píxel + cáusticas; agua GPU con reflexión/refracción y mapa de normales procedural (`makeWaterTex`); cascadas con vetas y bruma; cielo día/noche; partículas 2000 (espuma + bruma); instancias (pino/cerezo/roca/farol/bambu/arbusto/pasto/lámparas/peces) con frustumCulled=false.
+### README.md a81b0e32797834aa69307516b7f94c75d217459dd74cd0e56db1c6a115ae2e27 c930fe273fdfc9b792d39da1bdecb7ad11889f1db6f431adf2688c443bc22555
+@@ 14 15 1
+- Simulación de agua en tiempo real (modelo de tuberías / shallow water) sobre malla de 256x256
+@@ 33 34 1
+Three.js r186 (módulo ES desde jsDelivr), JavaScript vanilla, un solo archivo. Sin backend. Agua con mapa de normales procedural, cascadas con vetas y bruma, y modo opcional "Luz física (beta)" (`?color=fisico`).
