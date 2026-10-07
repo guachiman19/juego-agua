@@ -12,7 +12,7 @@ Versión retro del jardín japonés en `8bit/`: toca el agua de arriba para lanz
 
 ## Características
 
-- Simulación de agua en tiempo real (modelo de tuberías / shallow water) sobre malla de 128x128
+- Simulación de agua en tiempo real (modelo de tuberías / shallow water) sobre malla de 256x256
 - Erosión hidráulica: el agua transporta sedimento y transforma la montaña en valles y mesetas
 - Herramientas de esculpido: elevar, excavar, aplanar (mesetas), suavizar
 - Manantiales colocables con caudal ajustable
@@ -31,4 +31,4 @@ Versión retro del jardín japonés en `8bit/`: toca el agua de arriba para lanz
 
 ## Stack
 
-Three.js r128, JavaScript vanilla, un solo archivo. Sin backend.
+Three.js r186 (módulo ES desde jsDelivr), JavaScript vanilla, un solo archivo. Sin backend. Agua con mapa de normales procedural, cascadas con vetas y bruma, y modo opcional "Luz física (beta)" (`?color=fisico`).
